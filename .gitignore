@@ -1,0 +1,17 @@
+node_modules/
+package-lock.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+lib/
+*.tsbuildinfo

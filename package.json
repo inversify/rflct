@@ -1,0 +1,51 @@
+{
+  "name": "rflct",
+  "version": "0.0.1-alpha.0",
+  "description": "RFLCT — ahead-of-time reflect metadata for TypeScript 7. Injects design:symbols and design:arguments at build time via unplugin or the TS7 API.",
+  "license": "MIT",
+  "type": "module",
+  "types": "./types/index.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.ts",
+      "default": "./runtime/index.js"
+    },
+    "./unplugin": "./src/unplugin.mjs",
+    "./vite": "./src/unplugin.mjs",
+    "./rollup": "./src/unplugin.mjs",
+    "./webpack": "./src/unplugin.mjs",
+    "./esbuild": "./src/unplugin.mjs",
+    "./transform": "./src/core/transform.mjs"
+  },
+  "bin": {
+    "rflct": "./src/cli.mjs"
+  },
+  "files": [
+    "src",
+    "runtime",
+    "types"
+  ],
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\"",
+    "baseline-accept": "ACCEPT_BASELINES=1 node --test \"tests/*.test.mjs\""
+  },
+  "dependencies": {
+    "oxc-parser": "^0.147.0",
+    "reflect-metadata": "^0.2.2",
+    "unplugin": "^3.3.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}
