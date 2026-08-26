@@ -1,5 +1,5 @@
 {
-  "name": "@inversify/rflct",
+  "name": "@remojansen/rflct",
   "version": "0.0.1-alpha.0",
   "description": "RFLCT — ahead-of-time reflect metadata for TypeScript 7. Injects design:symbols and design:paramtypes at build time via unplugin or the TS7 API.",
   "license": "MIT",
