@@ -9,7 +9,7 @@ class Polygon implements Shape {
   sides = 3;
   constructor(public s: Reflect<number>) {}
 }
-Reflect.defineMetadata("design:arguments", [{ type: Number, metadata: {} }], Polygon, undefined);
+Reflect.defineMetadata("design:paramtypes", [{ type: Number, metadata: {} }], Polygon, undefined);
 
 const shapeId = __RFLCT_Shape;
 const polyId = Polygon;

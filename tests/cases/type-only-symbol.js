@@ -15,7 +15,7 @@ class Polygon {
     public label: Reflect<string>
   ) {}
 }
-Reflect.defineMetadata("design:arguments", [{ type: __RFLCT_Shape, metadata: {} }, { type: __RFLCT_Corner, metadata: {} }, { type: String, metadata: {} }], Polygon, undefined);
+Reflect.defineMetadata("design:paramtypes", [{ type: __RFLCT_Shape, metadata: {} }, { type: __RFLCT_Corner, metadata: {} }, { type: String, metadata: {} }], Polygon, undefined);
 
 Reflect.defineMetadata("design:symbols", Object.assign(Reflect.getMetadata("design:symbols", Reflect) ?? {}, {
   "rflct-tests@0|type-only-symbol.ts|Shape": __RFLCT_Shape,

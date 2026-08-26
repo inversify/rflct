@@ -1,7 +1,7 @@
 {
   "name": "rflct",
   "version": "0.0.1-alpha.0",
-  "description": "RFLCT — ahead-of-time reflect metadata for TypeScript 7. Injects design:symbols and design:arguments at build time via unplugin or the TS7 API.",
+  "description": "RFLCT — ahead-of-time reflect metadata for TypeScript 7. Injects design:symbols and design:paramtypes at build time via unplugin or the TS7 API.",
   "license": "MIT",
   "type": "module",
   "types": "./types/index.ts",
@@ -10,24 +10,25 @@
       "types": "./types/index.ts",
       "default": "./runtime/index.js"
     },
-    "./unplugin": "./src/unplugin.mjs",
-    "./vite": "./src/unplugin.mjs",
-    "./rollup": "./src/unplugin.mjs",
-    "./webpack": "./src/unplugin.mjs",
-    "./esbuild": "./src/unplugin.mjs",
-    "./transform": "./src/core/transform.mjs"
+    "./unplugin": "./dist/unplugin.js",
+    "./vite": "./dist/unplugin.js",
+    "./rollup": "./dist/unplugin.js",
+    "./webpack": "./dist/unplugin.js",
+    "./esbuild": "./dist/unplugin.js",
+    "./transform": "./dist/core/transform.js"
   },
   "bin": {
-    "rflct": "./src/cli.mjs"
+    "rflct": "./dist/cli.js"
   },
   "files": [
-    "src",
+    "dist",
     "runtime",
     "types"
   ],
   "scripts": {
-    "test": "node --test \"tests/*.test.mjs\"",
-    "baseline-accept": "ACCEPT_BASELINES=1 node --test \"tests/*.test.mjs\""
+    "build": "tsc",
+    "test": "node --test \"tests/*.test.ts\"",
+    "baseline-accept": "ACCEPT_BASELINES=1 node --test \"tests/*.test.ts\""
   },
   "dependencies": {
     "oxc-parser": "^0.147.0",
@@ -43,6 +44,7 @@
     }
   },
   "devDependencies": {
+    "@types/node": "^26.3.0",
     "typescript": "^7.0.2"
   },
   "engines": {

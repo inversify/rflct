@@ -1,6 +1,6 @@
 /**
  * Marks a parameter for metadata injection. In type position it is transparently `T`.
- * The transformer reads the annotation and injects `design:arguments` metadata.
+ * The transformer reads the annotation and injects `design:paramtypes` metadata.
  *
  * `Metadata` is an optional object type carried alongside the type info.
  *

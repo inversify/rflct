@@ -14,7 +14,7 @@ export class Untouched {
 class Internal {
   handle(req: Reflect<string>): void {}
 }
-Reflect.defineMetadata("design:arguments", [{ type: String, metadata: {} }], Internal.prototype, "handle");
+Reflect.defineMetadata("design:paramtypes", [{ type: String, metadata: {} }], Internal.prototype, "handle");
 
 Reflect.defineMetadata("design:symbols", Object.assign(Reflect.getMetadata("design:symbols", Reflect) ?? {}, {
   "rflct-tests@0|methods-and-exports.ts|Service": Service,
