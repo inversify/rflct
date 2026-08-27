@@ -1,45 +1,57 @@
 # 🪞 RFLCT
 
-Ahead-of-time reflect metadata for TypeScript 7. Injects `design:symbols` and
-`design:arguments` at build time — no decorators, no `emitDecoratorMetadata`.
+Ahead-of-time reflect metadata for TypeScript 7. Injects `design:symbols`,
+`design:paramtypes`, `design:properties`, and `design:class` at build time — no
+decorators, no `emitDecoratorMetadata`.
 
 Integrates with any build tool via [unplugin](https://github.com/unjs/unplugin)
 (Vite, Rollup, webpack, esbuild), or use the CLI with the TypeScript 7 API for
 standalone `tsgo` projects.
 
+> **Why does this exist?** TC39 decorators are now standard, but
+> `emitDecoratorMetadata` was never part of the spec and is being removed. RFLCT
+> fills the gap by emitting type metadata from type annotations at compile time,
+> using the same `reflect-metadata` runtime and `design:*` keys that the
+> ecosystem already understands. Read the full
+> [Philosophy & Motivation](docs/philosophy.md).
+
 ## Quick example
 
 ```ts
-import { Reflect, resolve } from "rflct";
+import { Reflect, resolve } from "@remojansen/rflct";
 
 interface Shape { sides: number; }
 
 class Polygon {
+  public color: Reflect<string, { optional: true }>;
+
   constructor(
     public shape: Reflect<Shape>,
-    public label: Reflect<string, { optional: true }>
+    public label: Reflect<string>
   ) {}
 }
 
-// resolve<T>() → the runtime identity of T (Symbol for interfaces, class for classes)
 container.bind(resolve<Shape>()).to(Polygon);
 ```
 
 After transformation:
 
 ```js
-import "reflect-metadata";
-
 const __RFLCT_Shape = Symbol.for("@acme/shapes@1|src/geo.ts|Shape");
 
 class Polygon {
   constructor(shape, label) {}
 }
 
-Reflect.defineMetadata("design:arguments", [
+Reflect.defineMetadata("design:paramtypes", [
   { type: __RFLCT_Shape, metadata: {} },
-  { type: String, metadata: { optional: true } }
+  { type: String, metadata: {} }
 ], Polygon, undefined);
+
+Reflect.defineMetadata("design:properties", ["color"], Polygon);
+Reflect.defineMetadata("design:paramtypes", [
+  { type: String, metadata: { optional: true } }
+], Polygon.prototype, "color");
 
 container.bind(__RFLCT_Shape).to(Polygon);
 
@@ -51,38 +63,37 @@ Reflect.defineMetadata("design:symbols", Object.assign(
 ), Reflect);
 ```
 
-## Three transformations
+## Documentation
 
-### 1. `design:symbols` — global type registry
+| Guide | Description |
+|-------|-------------|
+| [Philosophy & Motivation](docs/philosophy.md) | Why RFLCT exists — TC39 decorators, `emitDecoratorMetadata` removal, and migration strategy |
+| [Constructor Injection](docs/constructor-injection.md) | `Reflect<T>` on constructor parameters — type mapping, optional metadata |
+| [Property Injection](docs/property-injection.md) | `Reflect<T>` on class properties — `design:properties` registry, per-property metadata |
+| [Method Parameters](docs/method-parameters.md) | `Reflect<T>` on method parameters — prototype-level metadata |
+| [Resolve Calls](docs/resolve-calls.md) | `resolve<T>()` — compile-time type resolution for DI bindings and map keys |
+| [Multi-Injection](docs/multi-injection.md) | `Reflect<T[]>` — array types with `elementType` for injecting collections |
+| [Metadata Arguments](docs/metadata-arguments.md) | `Reflect<T, M>` — attaching arbitrary metadata (optionality, constraints, names) |
+| [Class Metadata](docs/class-metadata.md) | `WithReflectMetadata<T>` — class-level metadata via `implements` clauses |
+| [Type-Only Symbols](docs/type-only-symbols.md) | How interfaces and type aliases get stable `Symbol.for(...)` runtime identities |
+| [Symbol Qualification](docs/symbol-qualification.md) | The `package@major\|path\|Name` format and cross-package interop guarantees |
 
-Every class, interface, and type alias in a file is registered in a process-wide
-Map on `Reflect`. Interfaces/types become `Symbol.for(qualifiedName)`, classes
-map to their constructor.
+## Four transformations
 
-### 2. `design:arguments` — parameter type metadata
+| # | Metadata key | What it does |
+|---|-------------|--------------|
+| 1 | `design:symbols` | Global type registry — every class, interface, and type alias is registered process-wide |
+| 2 | `design:paramtypes` | Parameter and property type metadata — `{ type, metadata }` entries for constructors, methods, and properties |
+| 3 | `design:properties` | Property name registry — lists which properties on a class carry `Reflect<T>` annotations |
+| 4 | `design:class` | Class-level metadata via `WithReflectMetadata<T>` in `implements` clauses |
 
-Parameters annotated with `Reflect<T>` (or `Reflect<T, Metadata>`) produce a
-`Reflect.defineMetadata("design:arguments", [...], target, key)` call:
-
-- **Constructor**: target = `ClassName`, key = `undefined`
-- **Method**: target = `ClassName.prototype`, key = `"methodName"`
-
-Each entry is `{ type, metadata }` where metadata is the second type argument
-(defaults to `{}`).
-
-### 3. `resolve<T>()` — compile-time type resolution
-
-`resolve<T>()` is replaced at compile time with the runtime identity of `T`:
-
-- `resolve<Shape>()` → `Symbol.for("...Shape")` (interface/type → Symbol)
-- `resolve<Triangle>(Triangle)` → `Triangle` (class → itself)
-
-Works anywhere in source code — DI bindings, map keys, switch targets, etc.
+`resolve<T>()` is a fifth transformation that replaces calls with the runtime
+identity of `T` at compile time.
 
 ## Installation
 
 ```bash
-npm install rflct reflect-metadata
+npm install @remojansen/rflct reflect-metadata
 ```
 
 Import `reflect-metadata` once at your application entry point:
@@ -101,7 +112,7 @@ import per process is sufficient.
 
 ```js
 // vite.config.js
-import { vitePlugin } from "rflct/vite";
+import { vitePlugin } from "@remojansen/rflct/vite";
 
 export default {
   plugins: [vitePlugin()],
@@ -112,7 +123,7 @@ export default {
 
 ```js
 // rollup.config.js
-import { rollupPlugin } from "rflct/rollup";
+import { rollupPlugin } from "@remojansen/rflct/rollup";
 
 export default {
   plugins: [rollupPlugin()],
@@ -123,7 +134,7 @@ export default {
 
 ```js
 // webpack.config.js
-const { webpackPlugin } = require("rflct/webpack");
+const { webpackPlugin } = require("@remojansen/rflct/webpack");
 
 module.exports = {
   plugins: [webpackPlugin()],
@@ -133,7 +144,7 @@ module.exports = {
 ### esbuild
 
 ```js
-import { esbuildPlugin } from "rflct/esbuild";
+import { esbuildPlugin } from "@remojansen/rflct/esbuild";
 
 await esbuild.build({
   plugins: [esbuildPlugin()],
@@ -157,28 +168,16 @@ The CLI uses the TypeScript 7 API (`typescript/unstable/sync`) to load the
 program, resolve types via the checker, and optionally validate the result
 through VFS overlays.
 
-## Symbol qualification
-
-Generated symbols use `Symbol.for(qualifiedName)` where the key is:
-
-```
-packageName@majorVersion|packageRelativePath|TypeName
-```
-
-For example: `@acme/shapes@1|src/geo.ts|Shape`
-
-- **Package identity** prevents collisions between independently built packages.
-- **Major-only versioning** means patch/minor releases share symbols and interoperate.
-- **`Symbol.for`** (not `Symbol()`) ensures two packages depending on the same
-  shared library resolve to the same symbol.
-
 ## API
 
 ### Types (imported by consumers)
 
 ```ts
-// Marks a parameter for metadata injection. Erases to T.
+// Marks a parameter/property for metadata injection. Erases to T.
 type Reflect<T, Metadata = {}> = T;
+
+// Phantom type for class-level metadata via implements clauses.
+type WithReflectMetadata<T = {}> = { ... };
 
 // Compile-time resolution — replaced by the transformer.
 function resolve<T>(value?: new (...args: any[]) => T): symbol | (new (...args: any[]) => T);
@@ -187,9 +186,13 @@ function resolve<T>(value?: new (...args: any[]) => T): symbol | (new (...args: 
 ### Programmatic transform
 
 ```js
-import { transform } from "rflct/transform";
+import { transform } from "@remojansen/rflct/transform";
 
 const result = transform(source, fileName);
 // result.code — transformed source (still TypeScript, ready for type-stripping)
 // result.transformed — whether any changes were made
 ```
+
+## License
+
+MIT

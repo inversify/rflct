@@ -11,7 +11,14 @@ import {
 
 const MARKER_NAME = 'Reflect';
 const RESOLVE_NAME = 'resolve';
-const PACKAGE_NAME = 'rflct';
+const WITH_REFLECT_METADATA_NAME = 'WithReflectMetadata';
+const PACKAGE_NAMES: string[] = ['rflct', '@remojansen/rflct'];
+
+function isPackageImport(src: string): boolean {
+  return PACKAGE_NAMES.some(
+    (name: string) => src === name || src.startsWith(name + '/'),
+  );
+}
 
 interface DeclInfo {
   kind: string;
@@ -28,15 +35,23 @@ interface ParamEntry {
 
 interface ReflectionInfo {
   className: string;
+  // null = constructor, string = method or property name
   methodName: string | null;
   params: ParamEntry[];
   insertAfter: number;
+  isProperty?: boolean;
 }
 
 interface ResolveCallInfo {
   start: number;
   end: number;
   replacement: string;
+}
+
+interface ClassMetadataInfo {
+  className: string;
+  metadataExpr: string;
+  insertAfter: number;
 }
 
 interface Edit {
@@ -74,7 +89,7 @@ export function transform(
   for (const node of body) {
     if (node.type !== 'ImportDeclaration') continue;
     const src: string = node.source.value;
-    if (src === PACKAGE_NAME || src.startsWith(PACKAGE_NAME + '/')) {
+    if (isPackageImport(src)) {
       for (const spec of node.specifiers ?? []) {
         if (spec.type === 'ImportSpecifier') {
           markerImports.add(spec.local.name);
@@ -99,7 +114,7 @@ export function transform(
     }
   }
 
-  if (!markerImports.has(MARKER_NAME) && !markerImports.has(RESOLVE_NAME)) {
+  if (!markerImports.has(MARKER_NAME) && !markerImports.has(RESOLVE_NAME) && !markerImports.has(WITH_REFLECT_METADATA_NAME)) {
     return { code: source, transformed: false };
   }
 
@@ -122,16 +137,38 @@ export function transform(
 
   const reflections: ReflectionInfo[] = [];
   const resolveCalls: ResolveCallInfo[] = [];
+  const classMetadataList: ClassMetadataInfo[] = [];
   const neededSymbols = new Set<string>();
+
+  // Track same-file type aliases resolving to WithReflectMetadata<T>.
+  const classMetadataAliases = new Map<string, any>();
+  for (const node of body) {
+    let inner: any = node;
+    if (node.type === 'ExportNamedDeclaration' && node.declaration) {
+      inner = node.declaration;
+    }
+    if (inner.type === 'TSTypeAliasDeclaration') {
+      const typeNode: any = inner.typeAnnotation;
+      if (
+        typeNode?.type === 'TSTypeReference' &&
+        typeNode.typeName?.type === 'Identifier' &&
+        typeNode.typeName.name === WITH_REFLECT_METADATA_NAME &&
+        markerImports.has(WITH_REFLECT_METADATA_NAME)
+      ) {
+        classMetadataAliases.set(inner.id.name, typeNode.typeArguments?.params?.[0] ?? null);
+      }
+    }
+  }
 
   for (const node of body) {
     if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') {
       collectClassReflections(node, source, declarations, reflections, neededSymbols);
+      collectClassMetadata(node, source, markerImports, classMetadataAliases, classMetadataList);
     }
     walkForResolveCalls(node, declarations, resolveCalls, neededSymbols);
   }
 
-  if (reflections.length === 0 && resolveCalls.length === 0) {
+  if (reflections.length === 0 && resolveCalls.length === 0 && classMetadataList.length === 0) {
     return { code: source, transformed: false };
   }
 
@@ -141,7 +178,7 @@ export function transform(
   for (const node of body) {
     if (node.type !== 'ImportDeclaration') continue;
     const src: string = node.source.value;
-    if (src === PACKAGE_NAME || src.startsWith(PACKAGE_NAME + '/')) {
+    if (isPackageImport(src)) {
       edits.push({ start: node.start, end: node.end, replacement: '' });
     }
   }
@@ -164,6 +201,9 @@ export function transform(
   }
 
   // Inject design:paramtypes metadata after each class.
+  // Group reflections by class to emit design:properties.
+  const classPropertyNames = new Map<string, string[]>();
+
   for (const ref of reflections) {
     const entries: string[] = ref.params.map((p: ParamEntry) => {
       let entry = `{ type: ${p.type}, metadata: ${p.metadata}`;
@@ -177,6 +217,33 @@ export function transform(
       ref.methodName === null ? 'undefined' : JSON.stringify(ref.methodName);
     const call = `\nReflect.defineMetadata("design:paramtypes", ${array}, ${target}, ${key});`;
     edits.push({ start: ref.insertAfter, end: ref.insertAfter, replacement: call });
+
+    if (ref.isProperty === true && ref.methodName !== null) {
+      let props: string[] | undefined = classPropertyNames.get(ref.className);
+      if (props === undefined) {
+        props = [];
+        classPropertyNames.set(ref.className, props);
+      }
+      props.push(ref.methodName);
+    }
+  }
+
+  // Emit design:properties for each class that has property-level metadata.
+  for (const [className, props] of classPropertyNames) {
+    const ref: ReflectionInfo | undefined = reflections.find(
+      (r: ReflectionInfo) => r.className === className,
+    );
+    if (ref !== undefined) {
+      const propList: string = `[${props.map((p: string) => JSON.stringify(p)).join(', ')}]`;
+      const call = `\nReflect.defineMetadata("design:properties", ${propList}, ${className});`;
+      edits.push({ start: ref.insertAfter, end: ref.insertAfter, replacement: call });
+    }
+  }
+
+  // Emit design:class for classes with WithReflectMetadata in implements.
+  for (const cm of classMetadataList) {
+    const call = `\nReflect.defineMetadata("design:class", ${cm.metadataExpr}, ${cm.className});`;
+    edits.push({ start: cm.insertAfter, end: cm.insertAfter, replacement: call });
   }
 
   // Replace resolve<T>() calls.
@@ -251,7 +318,29 @@ function collectClassReflections(
   for (const member of classNode.body.body) {
     if (member.type !== 'MethodDefinition' && member.type !== 'PropertyDefinition')
       continue;
-    if (member.type === 'PropertyDefinition') continue;
+
+    if (member.type === 'PropertyDefinition') {
+      const marker = extractReflectMarker(member.typeAnnotation);
+      if (!marker) continue;
+      const serialized: string = serializeTypeNode(marker.typeNode, declarations);
+      const metadata: string = serializeMetadataNode(marker.metadataNode, source);
+      let elementType: string | undefined;
+      if (marker.typeNode.type === 'TSArrayType' && marker.typeNode.elementType) {
+        elementType = serializeTypeNode(marker.typeNode.elementType, declarations);
+        trackNeededSymbol(marker.typeNode.elementType, declarations, neededSymbols);
+      }
+      const propName: string = member.key.name ?? member.key.value;
+      trackNeededSymbol(marker.typeNode, declarations, neededSymbols);
+      reflections.push({
+        className,
+        methodName: propName,
+        params: [{ type: serialized, metadata, elementType }],
+        insertAfter: classNode.end,
+        isProperty: true,
+      });
+      continue;
+    }
+
     const fn: any = member.value;
     if (!fn || !fn.params) continue;
     const params: ParamEntry[] = [];
@@ -281,6 +370,41 @@ function collectClassReflections(
       params,
       insertAfter: classNode.end,
     });
+  }
+}
+
+function collectClassMetadata(
+  classNode: any,
+  source: string,
+  markerImports: Set<string>,
+  classMetadataAliases: Map<string, any>,
+  classMetadataList: ClassMetadataInfo[],
+): void {
+  const className: string | undefined = classNode.id?.name;
+  if (!className) return;
+  const impls: any[] | undefined = classNode.implements;
+  if (!impls || impls.length === 0) return;
+
+  for (const impl of impls) {
+    // oxc-parser: TSClassImplements { expression: Identifier, typeArguments?: ... }
+    const name: string | undefined = impl.expression?.name;
+    if (!name) continue;
+
+    // Direct WithReflectMetadata<T> usage
+    if (name === WITH_REFLECT_METADATA_NAME && markerImports.has(WITH_REFLECT_METADATA_NAME)) {
+      const metaNode: any = impl.typeArguments?.params?.[0];
+      const metadataExpr: string = metaNode ? serializeMetadataNode(metaNode, source) : '{}';
+      classMetadataList.push({ className, metadataExpr, insertAfter: classNode.end });
+      return;
+    }
+
+    // Same-file type alias resolving to WithReflectMetadata<T>
+    const aliasMetaNode: any | undefined = classMetadataAliases.get(name);
+    if (aliasMetaNode !== undefined) {
+      const metadataExpr: string = aliasMetaNode ? serializeMetadataNode(aliasMetaNode, source) : '{}';
+      classMetadataList.push({ className, metadataExpr, insertAfter: classNode.end });
+      return;
+    }
   }
 }
 

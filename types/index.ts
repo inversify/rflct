@@ -13,6 +13,14 @@
 export type Reflect<T, Metadata = {}> = T;
 
 /**
+ * Phantom type for class-level metadata via `implements` clauses.
+ * The transformer detects this in the implements list, extracts `T`,
+ * and emits `Reflect.defineMetadata("design:class", T, ClassName)`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+export type WithReflectMetadata<T = {}> = { readonly __rflct?: T; constructor: Function };
+
+/**
  * Compile-time resolution of a type's runtime identity.
  *
  * - For classes: `resolve<MyClass>(MyClass)` → `MyClass` (pass-through)
