@@ -7,7 +7,7 @@ metadata call on the class itself.
 ## Basic usage
 
 ```ts
-import { Reflect, WithReflectMetadata } from "@remojansen/rflct";
+import { Reflect, WithReflectMetadata } from "rflct";
 
 interface Logger {
   log(msg: string): void;
@@ -46,7 +46,7 @@ You can create a type alias for `WithReflectMetadata<T>` to avoid repeating the
 metadata object across many classes:
 
 ```ts
-import { Reflect, WithReflectMetadata } from "@remojansen/rflct";
+import { Reflect, WithReflectMetadata } from "rflct";
 
 type Injectable = WithReflectMetadata<{ scope: 'singleton' }>;
 

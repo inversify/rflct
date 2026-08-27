@@ -12,7 +12,7 @@ import {
 const MARKER_NAME = 'Reflect';
 const RESOLVE_NAME = 'resolve';
 const WITH_REFLECT_METADATA_NAME = 'WithReflectMetadata';
-const PACKAGE_NAMES: string[] = ['rflct', '@remojansen/rflct'];
+const PACKAGE_NAMES: string[] = ['rflct', 'rflct'];
 
 function isPackageImport(src: string): boolean {
   return PACKAGE_NAMES.some(
@@ -25,6 +25,7 @@ interface DeclInfo {
   name: string;
   exported: boolean;
   end: number;
+  topLevel?: boolean;
 }
 
 interface ParamEntry {
@@ -37,6 +38,8 @@ interface ReflectionInfo {
   className: string;
   // null = constructor, string = method or property name
   methodName: string | null;
+  // For computed property keys (e.g., [symbol]), stores the raw expression
+  computedKey?: string;
   params: ParamEntry[];
   insertAfter: number;
   isProperty?: boolean;
@@ -60,10 +63,28 @@ interface Edit {
   replacement: string;
 }
 
+export interface ReflectAliasConfig {
+  // Static metadata merged into output (e.g., { multi: true })
+  staticMetadata?: Record<string, unknown>;
+  // If true, first type param is element type; emitted type is Array
+  isArray?: boolean;
+  // Maps type param indices (0-based, skipping the first/main type) to metadata keys
+  // e.g., { name: 0 } means second type param → metadata.name
+  typeParamToMeta?: Record<string, number>;
+  // For tags: extracts key and value from type params as { [key]: value }
+  tagsFromParams?: { keyParam: number; valueParam: number };
+}
+
 export interface TransformOptions {
   checkerInfo?: Map<string, 'class' | 'interface' | 'type'>;
   include?: RegExp;
   exclude?: RegExp;
+  // Alias names mapped to their implicit config
+  reflectAliases?: Record<string, ReflectAliasConfig>;
+  // Additional names treated as WithReflectMetadata markers (e.g. ['Injectable'])
+  classMetadataAliases?: string[];
+  // Additional import source patterns to treat as rflct sources
+  importSources?: RegExp;
 }
 
 export interface TransformResult {
@@ -83,16 +104,39 @@ export function transform(
 
   const body: any[] = result.program.body;
 
-  // Collect imports from the marker package.
+  // Build sets of known marker names (canonical + configured aliases).
+  const reflectAliasMap: Map<string, ReflectAliasConfig> | undefined =
+    options?.reflectAliases ? new Map(Object.entries(options.reflectAliases)) : undefined;
+  const reflectAliasSet: Set<string> | undefined =
+    reflectAliasMap ? new Set(reflectAliasMap.keys()) : undefined;
+  const classMetadataAliasSet: Set<string> | undefined =
+    options?.classMetadataAliases ? new Set(options.classMetadataAliases) : undefined;
+
+  // Collect imports from the marker package (or matching importSources pattern).
   const markerImports = new Set<string>();
   const importedNames = new Map<string, { source: string; typeOnly: boolean }>();
   for (const node of body) {
     if (node.type !== 'ImportDeclaration') continue;
     const src: string = node.source.value;
-    if (isPackageImport(src)) {
+    const isMarkerSource: boolean = isPackageImport(src) || (options?.importSources?.test(src) ?? false);
+    if (isMarkerSource) {
       for (const spec of node.specifiers ?? []) {
         if (spec.type === 'ImportSpecifier') {
           markerImports.add(spec.local.name);
+        }
+      }
+    } else {
+      // Check if any imported names match configured aliases.
+      for (const spec of node.specifiers ?? []) {
+        if (spec.type === 'ImportSpecifier') {
+          const localName: string = spec.local.name;
+          if (
+            reflectAliasSet?.has(localName) ||
+            classMetadataAliasSet?.has(localName) ||
+            localName === RESOLVE_NAME
+          ) {
+            markerImports.add(localName);
+          }
         }
       }
     }
@@ -114,7 +158,14 @@ export function transform(
     }
   }
 
-  if (!markerImports.has(MARKER_NAME) && !markerImports.has(RESOLVE_NAME) && !markerImports.has(WITH_REFLECT_METADATA_NAME)) {
+  const hasAnyMarker: boolean =
+    markerImports.has(MARKER_NAME) ||
+    markerImports.has(RESOLVE_NAME) ||
+    markerImports.has(WITH_REFLECT_METADATA_NAME) ||
+    (reflectAliasSet !== undefined && [...reflectAliasSet].some((n: string) => markerImports.has(n))) ||
+    (classMetadataAliasSet !== undefined && [...classMetadataAliasSet].some((n: string) => markerImports.has(n)));
+
+  if (!hasAnyMarker) {
     return { code: source, transformed: false };
   }
 
@@ -122,8 +173,20 @@ export function transform(
   const declarations = new Map<string, DeclInfo>();
   for (const node of body) {
     const info: DeclInfo | null = extractDecl(node);
-    if (info) declarations.set(info.name, info);
+    if (info) {
+      info.topLevel = true;
+      declarations.set(info.name, info);
+    }
   }
+
+  // Also collect nested class declarations (common in test files).
+  walkAllNodesWithScope(body, source.length, (node: any) => {
+    if (node.type === 'ClassDeclaration' && node.id?.name) {
+      if (!declarations.has(node.id.name)) {
+        declarations.set(node.id.name, { kind: 'class', name: node.id.name, exported: false, end: node.end, topLevel: false });
+      }
+    }
+  });
 
   if (options?.checkerInfo) {
     for (const [name, kind] of options.checkerInfo) {
@@ -160,11 +223,27 @@ export function transform(
     }
   }
 
-  for (const node of body) {
+  // Walk all nodes (including nested) for class reflections and resolve calls.
+  // First pass: find last class end per scope for proper insertion ordering.
+  const lastClassEndPerScope = new Map<number, number>(); // scopeEnd → lastClassEnd
+  walkAllNodesWithScope(body, source.length, (node: any, scopeEnd: number) => {
     if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') {
-      collectClassReflections(node, source, declarations, reflections, neededSymbols);
-      collectClassMetadata(node, source, markerImports, classMetadataAliases, classMetadataList);
+      const current: number = lastClassEndPerScope.get(scopeEnd) ?? 0;
+      if (node.end > current) {
+        lastClassEndPerScope.set(scopeEnd, node.end);
+      }
     }
+  });
+
+  // Second pass: collect reflections using last-class-end as insertion point.
+  walkAllNodesWithScope(body, source.length, (node: any, scopeEnd: number) => {
+    if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') {
+      const insertAt: number = lastClassEndPerScope.get(scopeEnd) ?? node.end;
+      collectClassReflections(node, source, declarations, reflections, neededSymbols, reflectAliasSet, insertAt, reflectAliasMap);
+      collectClassMetadata(node, source, markerImports, classMetadataAliases, classMetadataList, classMetadataAliasSet, insertAt);
+    }
+  });
+  for (const node of body) {
     walkForResolveCalls(node, declarations, resolveCalls, neededSymbols);
   }
 
@@ -201,8 +280,8 @@ export function transform(
   }
 
   // Inject design:paramtypes metadata after each class.
-  // Group reflections by class to emit design:properties.
-  const classPropertyNames = new Map<string, string[]>();
+  // Group reflections by class+scope to emit design:properties.
+  const classPropertyNames = new Map<string, { className: string; insertAfter: number; props: string[] }>();
 
   for (const ref of reflections) {
     const entries: string[] = ref.params.map((p: ParamEntry) => {
@@ -214,30 +293,28 @@ export function transform(
     const target: string =
       ref.methodName === null ? ref.className : `${ref.className}.prototype`;
     const key: string =
-      ref.methodName === null ? 'undefined' : JSON.stringify(ref.methodName);
+      ref.methodName === null ? 'undefined'
+        : ref.computedKey ? ref.computedKey
+        : JSON.stringify(ref.methodName);
     const call = `\nReflect.defineMetadata("design:paramtypes", ${array}, ${target}, ${key});`;
     edits.push({ start: ref.insertAfter, end: ref.insertAfter, replacement: call });
 
     if (ref.isProperty === true && ref.methodName !== null) {
-      let props: string[] | undefined = classPropertyNames.get(ref.className);
-      if (props === undefined) {
-        props = [];
-        classPropertyNames.set(ref.className, props);
+      const scopeKey: string = `${ref.className}@${ref.insertAfter}`;
+      let entry = classPropertyNames.get(scopeKey);
+      if (entry === undefined) {
+        entry = { className: ref.className, insertAfter: ref.insertAfter, props: [] };
+        classPropertyNames.set(scopeKey, entry);
       }
-      props.push(ref.methodName);
+      entry.props.push(ref.computedKey ?? JSON.stringify(ref.methodName));
     }
   }
 
   // Emit design:properties for each class that has property-level metadata.
-  for (const [className, props] of classPropertyNames) {
-    const ref: ReflectionInfo | undefined = reflections.find(
-      (r: ReflectionInfo) => r.className === className,
-    );
-    if (ref !== undefined) {
-      const propList: string = `[${props.map((p: string) => JSON.stringify(p)).join(', ')}]`;
-      const call = `\nReflect.defineMetadata("design:properties", ${propList}, ${className});`;
-      edits.push({ start: ref.insertAfter, end: ref.insertAfter, replacement: call });
-    }
+  for (const [, entry] of classPropertyNames) {
+    const propList: string = `[${entry.props.join(', ')}]`;
+    const call = `\nReflect.defineMetadata("design:properties", ${propList}, ${entry.className});`;
+    edits.push({ start: entry.insertAfter, end: entry.insertAfter, replacement: call });
   }
 
   // Emit design:class for classes with WithReflectMetadata in implements.
@@ -251,15 +328,11 @@ export function transform(
     edits.push({ start: call.start, end: call.end, replacement: call.replacement });
   }
 
-  // Inject design:symbols at end of file.
+  // Inject design:symbols at end of file (only top-level declarations).
   const symbolEntries: string[] = [];
   for (const [name, info] of declarations) {
-    if (
-      info.kind === 'class' ||
-      neededSymbols.has(name) ||
-      info.kind === 'interface' ||
-      info.kind === 'type'
-    ) {
+    if (!info.topLevel) continue;
+    if (info.kind === 'class' || neededSymbols.has(name)) {
       const qn: string = qualifiedName(fileName, name);
       const value: string = info.kind === 'class' ? name : `__RFLCT_${name}`;
       symbolEntries.push(`  ${JSON.stringify(qn)}: ${value}`);
@@ -306,36 +379,117 @@ function hasExportKeyword(node: any): boolean {
   );
 }
 
+function buildParamEntry(
+  marker: import('./serialize.js').ReflectMarker,
+  source: string,
+  declarations: Map<string, DeclInfo>,
+  neededSymbols: Set<string>,
+  reflectAliasMap?: Map<string, ReflectAliasConfig>,
+): ParamEntry {
+  const aliasConfig: ReflectAliasConfig | undefined =
+    marker.aliasName ? reflectAliasMap?.get(marker.aliasName) : undefined;
+
+  let elementType: string | undefined;
+
+  if (aliasConfig?.isArray) {
+    elementType = serializeTypeNode(marker.typeNode, declarations);
+    trackNeededSymbol(marker.typeNode, declarations, neededSymbols);
+    const metadata: string = buildAliasMetadata(aliasConfig, marker.allTypeParams, source);
+    return { type: 'Array', metadata, elementType };
+  }
+
+  if (marker.typeNode.type === 'TSArrayType' && marker.typeNode.elementType) {
+    elementType = serializeTypeNode(marker.typeNode.elementType, declarations);
+    trackNeededSymbol(marker.typeNode.elementType, declarations, neededSymbols);
+  }
+
+  const serialized: string = serializeTypeNode(marker.typeNode, declarations);
+  trackNeededSymbol(marker.typeNode, declarations, neededSymbols);
+
+  if (aliasConfig) {
+    const metadata: string = buildAliasMetadata(aliasConfig, marker.allTypeParams, source);
+    return { type: serialized, metadata, elementType };
+  }
+
+  const metadata: string = serializeMetadataNode(marker.metadataNode, source);
+  return { type: serialized, metadata, elementType };
+}
+
+function buildAliasMetadata(
+  config: ReflectAliasConfig,
+  typeParams: any[],
+  source: string,
+): string {
+  const parts: string[] = [];
+
+  if (config.staticMetadata) {
+    for (const [key, value] of Object.entries(config.staticMetadata)) {
+      parts.push(`${key}: ${JSON.stringify(value)}`);
+    }
+  }
+
+  if (config.typeParamToMeta) {
+    for (const [metaKey, paramIndex] of Object.entries(config.typeParamToMeta)) {
+      const param: any = typeParams[paramIndex + 1]; // +1 because index 0 is the main type
+      if (param) {
+        parts.push(`${metaKey}: ${serializeLiteralType(param, source)}`);
+      }
+    }
+  }
+
+  if (config.tagsFromParams) {
+    const keyParam: any = typeParams[config.tagsFromParams.keyParam + 1];
+    const valueParam: any = typeParams[config.tagsFromParams.valueParam + 1];
+    if (keyParam && valueParam) {
+      const key: string = serializeLiteralType(keyParam, source);
+      const value: string = serializeLiteralType(valueParam, source);
+      parts.push(`tags: { [${key}]: ${value} }`);
+    }
+  }
+
+  return `{ ${parts.join(', ')} }`;
+}
+
+function serializeLiteralType(node: any, source: string): string {
+  if (!node) return 'undefined';
+  switch (node.type) {
+    case 'TSLiteralType':
+      return source.slice(node.start, node.end);
+    default:
+      return source.slice(node.start, node.end);
+  }
+}
+
 function collectClassReflections(
   classNode: any,
   source: string,
   declarations: Map<string, DeclInfo>,
   reflections: ReflectionInfo[],
   neededSymbols: Set<string>,
+  reflectAliasSet?: Set<string>,
+  scopeEnd?: number,
+  reflectAliasMap?: Map<string, ReflectAliasConfig>,
 ): void {
   const className: string | undefined = classNode.id?.name;
   if (!className) return;
+  const insertPos: number = scopeEnd ?? classNode.end;
   for (const member of classNode.body.body) {
     if (member.type !== 'MethodDefinition' && member.type !== 'PropertyDefinition')
       continue;
 
     if (member.type === 'PropertyDefinition') {
-      const marker = extractReflectMarker(member.typeAnnotation);
+      const marker = extractReflectMarker(member.typeAnnotation, reflectAliasSet);
       if (!marker) continue;
-      const serialized: string = serializeTypeNode(marker.typeNode, declarations);
-      const metadata: string = serializeMetadataNode(marker.metadataNode, source);
-      let elementType: string | undefined;
-      if (marker.typeNode.type === 'TSArrayType' && marker.typeNode.elementType) {
-        elementType = serializeTypeNode(marker.typeNode.elementType, declarations);
-        trackNeededSymbol(marker.typeNode.elementType, declarations, neededSymbols);
-      }
-      const propName: string = member.key.name ?? member.key.value;
-      trackNeededSymbol(marker.typeNode, declarations, neededSymbols);
+      const entry: ParamEntry = buildParamEntry(marker, source, declarations, neededSymbols, reflectAliasMap);
+      const propName: string = member.computed
+        ? source.slice(member.key.start, member.key.end)
+        : (member.key.name ?? member.key.value);
       reflections.push({
         className,
         methodName: propName,
-        params: [{ type: serialized, metadata, elementType }],
-        insertAfter: classNode.end,
+        computedKey: member.computed ? propName : undefined,
+        params: [entry],
+        insertAfter: insertPos,
         isProperty: true,
       });
       continue;
@@ -346,18 +500,9 @@ function collectClassReflections(
     const params: ParamEntry[] = [];
     for (const param of fn.params) {
       const p: any = unwrapParam(param);
-      const marker = extractReflectMarker(p.typeAnnotation);
+      const marker = extractReflectMarker(p.typeAnnotation, reflectAliasSet);
       if (!marker) continue;
-      const serialized: string = serializeTypeNode(marker.typeNode, declarations);
-      const metadata: string = serializeMetadataNode(marker.metadataNode, source);
-      // For array types (T[]), extract the element type for DI multi-inject.
-      let elementType: string | undefined;
-      if (marker.typeNode.type === 'TSArrayType' && marker.typeNode.elementType) {
-        elementType = serializeTypeNode(marker.typeNode.elementType, declarations);
-        trackNeededSymbol(marker.typeNode.elementType, declarations, neededSymbols);
-      }
-      params.push({ type: serialized, metadata, elementType });
-      trackNeededSymbol(marker.typeNode, declarations, neededSymbols);
+      params.push(buildParamEntry(marker, source, declarations, neededSymbols, reflectAliasMap));
     }
     if (params.length === 0) continue;
     const methodName: string | null =
@@ -368,7 +513,8 @@ function collectClassReflections(
       className,
       methodName,
       params,
-      insertAfter: classNode.end,
+      insertAfter: insertPos,
+      isProperty: member.kind === 'set' ? true : undefined,
     });
   }
 }
@@ -379,9 +525,12 @@ function collectClassMetadata(
   markerImports: Set<string>,
   classMetadataAliases: Map<string, any>,
   classMetadataList: ClassMetadataInfo[],
+  classMetadataAliasSet?: Set<string>,
+  scopeEnd?: number,
 ): void {
   const className: string | undefined = classNode.id?.name;
   if (!className) return;
+  const insertPos: number = scopeEnd ?? classNode.end;
   const impls: any[] | undefined = classNode.implements;
   if (!impls || impls.length === 0) return;
 
@@ -394,7 +543,15 @@ function collectClassMetadata(
     if (name === WITH_REFLECT_METADATA_NAME && markerImports.has(WITH_REFLECT_METADATA_NAME)) {
       const metaNode: any = impl.typeArguments?.params?.[0];
       const metadataExpr: string = metaNode ? serializeMetadataNode(metaNode, source) : '{}';
-      classMetadataList.push({ className, metadataExpr, insertAfter: classNode.end });
+      classMetadataList.push({ className, metadataExpr, insertAfter: insertPos });
+      return;
+    }
+
+    // Configured classMetadataAliases (e.g. 'Injectable')
+    if (classMetadataAliasSet?.has(name) && markerImports.has(name)) {
+      const metaNode: any = impl.typeArguments?.params?.[0];
+      const metadataExpr: string = metaNode ? serializeMetadataNode(metaNode, source) : '{}';
+      classMetadataList.push({ className, metadataExpr, insertAfter: insertPos });
       return;
     }
 
@@ -402,7 +559,7 @@ function collectClassMetadata(
     const aliasMetaNode: any | undefined = classMetadataAliases.get(name);
     if (aliasMetaNode !== undefined) {
       const metadataExpr: string = aliasMetaNode ? serializeMetadataNode(aliasMetaNode, source) : '{}';
-      classMetadataList.push({ className, metadataExpr, insertAfter: classNode.end });
+      classMetadataList.push({ className, metadataExpr, insertAfter: insertPos });
       return;
     }
   }
@@ -471,6 +628,39 @@ function walkForResolveCalls(
       }
     } else if (child && typeof child === 'object' && child.type) {
       walkForResolveCalls(child, declarations, resolveCalls, neededSymbols);
+    }
+  }
+}
+
+function walkAllNodesWithScope(nodes: any[], scopeEnd: number, visitor: (node: any, scopeEnd: number) => void): void {
+  for (const node of nodes) {
+    walkNodeWithScope(node, scopeEnd, visitor);
+  }
+}
+
+function walkNodeWithScope(node: any, scopeEnd: number, visitor: (node: any, scopeEnd: number) => void): void {
+  if (!node || typeof node !== 'object') return;
+  if (node.type) visitor(node, scopeEnd);
+  // Update scopeEnd when entering a new function/arrow body.
+  let childScopeEnd: number = scopeEnd;
+  if (
+    (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') &&
+    node.body?.type === 'BlockStatement'
+  ) {
+    // Insert before the closing brace of the block.
+    childScopeEnd = node.body.end - 1;
+  }
+  for (const key of Object.keys(node)) {
+    if (key === 'start' || key === 'end' || key === 'type') continue;
+    const child: any = node[key];
+    if (Array.isArray(child)) {
+      for (const item of child) {
+        if (item && typeof item === 'object' && item.type) {
+          walkNodeWithScope(item, childScopeEnd, visitor);
+        }
+      }
+    } else if (child && typeof child === 'object' && child.type) {
+      walkNodeWithScope(child, childScopeEnd, visitor);
     }
   }
 }

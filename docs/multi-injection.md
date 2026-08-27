@@ -7,7 +7,7 @@ containers to inject all bindings for the element type as a collection.
 ## Basic usage
 
 ```ts
-import { Reflect } from "@remojansen/rflct";
+import { Reflect } from "rflct";
 
 interface Weapon {
   damage: number;

@@ -6,7 +6,7 @@ and a `design:properties` registry listing which properties carry metadata.
 ## Basic usage
 
 ```ts
-import { Reflect } from "@remojansen/rflct";
+import { Reflect } from "rflct";
 
 interface Weapon {
   damage: number;

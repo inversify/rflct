@@ -67,17 +67,26 @@ function identifierName(node: any): string | null {
 export interface ReflectMarker {
   typeNode: any;
   metadataNode: any | null;
+  aliasName: string | null;
+  allTypeParams: any[];
 }
 
-export function extractReflectMarker(typeAnnotation: any): ReflectMarker | null {
+export function extractReflectMarker(typeAnnotation: any, markerNames?: Set<string>): ReflectMarker | null {
   if (!typeAnnotation) return null;
   const typeRef: any = typeAnnotation.typeAnnotation;
   if (!typeRef || typeRef.type !== 'TSTypeReference') return null;
   if (!typeRef.typeName || typeRef.typeName.type !== 'Identifier') return null;
-  if (typeRef.typeName.name !== MARKER_NAME) return null;
+  const name: string = typeRef.typeName.name;
+  const isCanonical: boolean = name === MARKER_NAME;
+  if (!isCanonical && !(markerNames?.has(name))) return null;
   const params: any[] | undefined = typeRef.typeArguments?.params;
   if (!params || params.length === 0) return null;
-  return { typeNode: params[0], metadataNode: params[1] ?? null };
+  return {
+    typeNode: params[0],
+    metadataNode: isCanonical ? (params[1] ?? null) : null,
+    aliasName: isCanonical ? null : name,
+    allTypeParams: params,
+  };
 }
 
 export function serializeMetadataNode(node: any, source: string): string {

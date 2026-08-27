@@ -7,7 +7,7 @@ no string lookups.
 ## Basic usage
 
 ```ts
-import { Reflect, resolve } from "@remojansen/rflct";
+import { Reflect, resolve } from "rflct";
 
 interface Shape {
   sides: number;

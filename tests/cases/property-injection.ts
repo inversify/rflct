@@ -1,4 +1,4 @@
-import { Reflect } from "@remojansen/rflct";
+import { Reflect } from "rflct";
 
 interface Weapon {
   damage: number;

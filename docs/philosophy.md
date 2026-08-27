@@ -41,7 +41,7 @@ side effect, you annotate parameters and properties with `Reflect<T>` — a
 zero-cost type alias that the RFLCT transformer reads during compilation:
 
 ```ts
-import { Reflect } from "@remojansen/rflct";
+import { Reflect } from "rflct";
 
 class UserService {
   constructor(

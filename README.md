@@ -18,7 +18,7 @@ standalone `tsgo` projects.
 ## Quick example
 
 ```ts
-import { Reflect, resolve } from "@remojansen/rflct";
+import { Reflect, resolve } from "rflct";
 
 interface Shape { sides: number; }
 
@@ -93,7 +93,7 @@ identity of `T` at compile time.
 ## Installation
 
 ```bash
-npm install @remojansen/rflct reflect-metadata
+npm install rflct reflect-metadata
 ```
 
 Import `reflect-metadata` once at your application entry point:
@@ -112,7 +112,7 @@ import per process is sufficient.
 
 ```js
 // vite.config.js
-import { vitePlugin } from "@remojansen/rflct/vite";
+import { vitePlugin } from "rflct/vite";
 
 export default {
   plugins: [vitePlugin()],
@@ -123,7 +123,7 @@ export default {
 
 ```js
 // rollup.config.js
-import { rollupPlugin } from "@remojansen/rflct/rollup";
+import { rollupPlugin } from "rflct/rollup";
 
 export default {
   plugins: [rollupPlugin()],
@@ -134,7 +134,7 @@ export default {
 
 ```js
 // webpack.config.js
-const { webpackPlugin } = require("@remojansen/rflct/webpack");
+const { webpackPlugin } = require("rflct/webpack");
 
 module.exports = {
   plugins: [webpackPlugin()],
@@ -144,7 +144,7 @@ module.exports = {
 ### esbuild
 
 ```js
-import { esbuildPlugin } from "@remojansen/rflct/esbuild";
+import { esbuildPlugin } from "rflct/esbuild";
 
 await esbuild.build({
   plugins: [esbuildPlugin()],
@@ -186,7 +186,7 @@ function resolve<T>(value?: new (...args: any[]) => T): symbol | (new (...args: 
 ### Programmatic transform
 
 ```js
-import { transform } from "@remojansen/rflct/transform";
+import { transform } from "rflct/transform";
 
 const result = transform(source, fileName);
 // result.code — transformed source (still TypeScript, ready for type-stripping)

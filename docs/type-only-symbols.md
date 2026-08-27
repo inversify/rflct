@@ -7,7 +7,7 @@ constants at build time.
 ## Basic usage
 
 ```ts
-import { Reflect } from "@remojansen/rflct";
+import { Reflect } from "rflct";
 
 interface Shape {
   sides: number;

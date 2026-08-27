@@ -7,7 +7,7 @@ signatures — HTTP route handlers, RPC endpoints, event listeners, etc.
 ## Basic usage
 
 ```ts
-import { Reflect } from "@remojansen/rflct";
+import { Reflect } from "rflct";
 
 export class Service {
   constructor(

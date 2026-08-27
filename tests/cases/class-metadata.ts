@@ -1,4 +1,4 @@
-import { Reflect, WithReflectMetadata } from "@remojansen/rflct";
+import { Reflect, WithReflectMetadata } from "rflct";
 
 type Injectable = WithReflectMetadata<{ scope: 'singleton' }>;
 

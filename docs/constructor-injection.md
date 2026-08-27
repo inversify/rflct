@@ -7,7 +7,7 @@ know what to inject.
 ## Basic usage
 
 ```ts
-import { Reflect } from "@remojansen/rflct";
+import { Reflect } from "rflct";
 
 class Demo {
   constructor(

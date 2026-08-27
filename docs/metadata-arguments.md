@@ -7,7 +7,7 @@ verbatim into the transformed output.
 ## Basic usage
 
 ```ts
-import { Reflect } from "@remojansen/rflct";
+import { Reflect } from "rflct";
 
 interface Shape {
   sides: number;
