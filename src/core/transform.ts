@@ -179,11 +179,19 @@ export function transform(
     }
   }
 
-  // Also collect nested class declarations (common in test files).
+  // Also collect nested declarations (common in test files).
   walkAllNodesWithScope(body, source.length, (node: any) => {
     if (node.type === 'ClassDeclaration' && node.id?.name) {
       if (!declarations.has(node.id.name)) {
         declarations.set(node.id.name, { kind: 'class', name: node.id.name, exported: false, end: node.end, topLevel: false });
+      }
+    } else if (node.type === 'TSInterfaceDeclaration' && node.id?.name) {
+      if (!declarations.has(node.id.name)) {
+        declarations.set(node.id.name, { kind: 'interface', name: node.id.name, exported: false, end: node.end, topLevel: false });
+      }
+    } else if (node.type === 'TSTypeAliasDeclaration' && node.id?.name) {
+      if (!declarations.has(node.id.name)) {
+        declarations.set(node.id.name, { kind: 'type', name: node.id.name, exported: false, end: node.end, topLevel: false });
       }
     }
   });
@@ -225,7 +233,7 @@ export function transform(
 
   // Walk all nodes (including nested) for class reflections and resolve calls.
   // First pass: find last class end per scope for proper insertion ordering.
-  const lastClassEndPerScope = new Map<number, number>(); // scopeEnd → lastClassEnd
+  const lastClassEndPerScope = new Map<number, number>();
   walkAllNodesWithScope(body, source.length, (node: any, scopeEnd: number) => {
     if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') {
       const current: number = lastClassEndPerScope.get(scopeEnd) ?? 0;
@@ -233,19 +241,23 @@ export function transform(
         lastClassEndPerScope.set(scopeEnd, node.end);
       }
     }
-  });
+  }, declarations);
 
   // Second pass: collect reflections using last-class-end as insertion point.
-  walkAllNodesWithScope(body, source.length, (node: any, scopeEnd: number) => {
+  walkAllNodesWithScope(body, source.length, (node: any, scopeEnd: number, scopeDecls: Map<string, DeclInfo>) => {
     if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') {
       const insertAt: number = lastClassEndPerScope.get(scopeEnd) ?? node.end;
-      collectClassReflections(node, source, declarations, reflections, neededSymbols, reflectAliasSet, insertAt, reflectAliasMap);
+      collectClassReflections(node, source, scopeDecls, reflections, neededSymbols, reflectAliasSet, insertAt, reflectAliasMap);
       collectClassMetadata(node, source, markerImports, classMetadataAliases, classMetadataList, classMetadataAliasSet, insertAt);
     }
-  });
-  for (const node of body) {
-    walkForResolveCalls(node, declarations, resolveCalls, neededSymbols);
-  }
+  }, declarations);
+
+  // Third pass: collect resolve() calls with scope-aware declarations.
+  walkAllNodesWithScope(body, source.length, (node: any, _scopeEnd: number, scopeDecls: Map<string, DeclInfo>) => {
+    if (node.type === 'CallExpression') {
+      collectResolveCall(node, scopeDecls, resolveCalls, neededSymbols);
+    }
+  }, declarations);
 
   if (reflections.length === 0 && resolveCalls.length === 0 && classMetadataList.length === 0) {
     return { code: source, transformed: false };
@@ -585,84 +597,98 @@ function trackNeededSymbol(
   }
 }
 
-function walkForResolveCalls(
+function collectResolveCall(
   node: any,
   declarations: Map<string, DeclInfo>,
   resolveCalls: ResolveCallInfo[],
   neededSymbols: Set<string>,
 ): void {
-  if (!node || typeof node !== 'object') return;
-  if (node.type === 'CallExpression') {
-    const callee: any = node.callee;
+  const callee: any = node.callee;
+  if (
+    callee?.type === 'Identifier' &&
+    callee.name === RESOLVE_NAME &&
+    node.typeArguments
+  ) {
+    const typeParam: any = node.typeArguments.params?.[0];
     if (
-      callee?.type === 'Identifier' &&
-      callee.name === RESOLVE_NAME &&
-      node.typeArguments
+      typeParam?.type === 'TSTypeReference' &&
+      typeParam.typeName?.type === 'Identifier'
     ) {
-      const typeParam: any = node.typeArguments.params?.[0];
-      if (
-        typeParam?.type === 'TSTypeReference' &&
-        typeParam.typeName?.type === 'Identifier'
-      ) {
-        const typeName: string = typeParam.typeName.name;
-        const decl: DeclInfo | undefined = declarations.get(typeName);
-        let replacement: string;
-        if (decl && decl.kind === 'class') {
-          replacement = typeName;
-        } else {
-          neededSymbols.add(typeName);
-          replacement = `__RFLCT_${typeName}`;
-        }
-        resolveCalls.push({ start: node.start, end: node.end, replacement });
+      const typeName: string = typeParam.typeName.name;
+      const decl: DeclInfo | undefined = declarations.get(typeName);
+      let replacement: string;
+      if (decl && decl.kind === 'class') {
+        replacement = typeName;
+      } else {
+        neededSymbols.add(typeName);
+        replacement = `__RFLCT_${typeName}`;
       }
-    }
-  }
-  for (const key of Object.keys(node)) {
-    if (key === 'start' || key === 'end' || key === 'type') continue;
-    const child: any = node[key];
-    if (Array.isArray(child)) {
-      for (const item of child) {
-        if (item && typeof item === 'object' && item.type) {
-          walkForResolveCalls(item, declarations, resolveCalls, neededSymbols);
-        }
-      }
-    } else if (child && typeof child === 'object' && child.type) {
-      walkForResolveCalls(child, declarations, resolveCalls, neededSymbols);
+      resolveCalls.push({ start: node.start, end: node.end, replacement });
     }
   }
 }
 
-function walkAllNodesWithScope(nodes: any[], scopeEnd: number, visitor: (node: any, scopeEnd: number) => void): void {
+function walkAllNodesWithScope(
+  nodes: any[],
+  scopeEnd: number,
+  visitor: (node: any, scopeEnd: number, scopeDecls: Map<string, DeclInfo>) => void,
+  scopeDecls: Map<string, DeclInfo> = new Map(),
+): void {
   for (const node of nodes) {
-    walkNodeWithScope(node, scopeEnd, visitor);
+    walkNodeWithScope(node, scopeEnd, visitor, scopeDecls);
   }
 }
 
-function walkNodeWithScope(node: any, scopeEnd: number, visitor: (node: any, scopeEnd: number) => void): void {
+function walkNodeWithScope(
+  node: any,
+  scopeEnd: number,
+  visitor: (node: any, scopeEnd: number, scopeDecls: Map<string, DeclInfo>) => void,
+  scopeDecls: Map<string, DeclInfo>,
+): void {
   if (!node || typeof node !== 'object') return;
-  if (node.type) visitor(node, scopeEnd);
-  // Update scopeEnd when entering a new function/arrow body.
+  // Update scopeEnd and declarations when entering a new function body.
   let childScopeEnd: number = scopeEnd;
+  let childDecls: Map<string, DeclInfo> = scopeDecls;
   if (
     (node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression' || node.type === 'FunctionDeclaration') &&
     node.body?.type === 'BlockStatement'
   ) {
-    // Insert before the closing brace of the block.
     childScopeEnd = node.body.end - 1;
+    // Scan this body for local class/interface/type declarations and shadow parent.
+    const localDecls: Map<string, DeclInfo> = collectBlockDeclarations(node.body.body);
+    if (localDecls.size > 0) {
+      childDecls = new Map([...scopeDecls, ...localDecls]);
+    }
   }
+  if (node.type) visitor(node, childScopeEnd, childDecls);
   for (const key of Object.keys(node)) {
     if (key === 'start' || key === 'end' || key === 'type') continue;
     const child: any = node[key];
     if (Array.isArray(child)) {
       for (const item of child) {
         if (item && typeof item === 'object' && item.type) {
-          walkNodeWithScope(item, childScopeEnd, visitor);
+          walkNodeWithScope(item, childScopeEnd, visitor, childDecls);
         }
       }
     } else if (child && typeof child === 'object' && child.type) {
-      walkNodeWithScope(child, childScopeEnd, visitor);
+      walkNodeWithScope(child, childScopeEnd, visitor, childDecls);
     }
   }
+}
+
+function collectBlockDeclarations(statements: any[]): Map<string, DeclInfo> {
+  const decls = new Map<string, DeclInfo>();
+  if (!statements) return decls;
+  for (const stmt of statements) {
+    if (stmt.type === 'ClassDeclaration' && stmt.id?.name) {
+      decls.set(stmt.id.name, { kind: 'class', name: stmt.id.name, exported: false, end: stmt.end, topLevel: false });
+    } else if (stmt.type === 'TSInterfaceDeclaration' && stmt.id?.name) {
+      decls.set(stmt.id.name, { kind: 'interface', name: stmt.id.name, exported: false, end: stmt.end, topLevel: false });
+    } else if (stmt.type === 'TSTypeAliasDeclaration' && stmt.id?.name) {
+      decls.set(stmt.id.name, { kind: 'type', name: stmt.id.name, exported: false, end: stmt.end, topLevel: false });
+    }
+  }
+  return decls;
 }
 
 function findFirstNonImport(body: any[]): number {
