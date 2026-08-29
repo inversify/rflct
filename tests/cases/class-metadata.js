@@ -1,7 +1,7 @@
 
 
 const __RFLCT_Logger = Symbol.for("rflct-tests@0|class-metadata.ts|Logger");
-type Injectable = WithReflectMetadata<{ scope: 'singleton' }>;
+type Injectable = Reflectable<{ scope: 'singleton' }>;
 
 interface Logger {
   log(msg: string): void;
@@ -11,11 +11,11 @@ class Service implements Injectable {
   constructor(logger: Reflect<Logger>) {}
 }
 
-class DirectMeta implements WithReflectMetadata<{ scope: 'transient' }> {
+class DirectMeta implements Reflectable<{ scope: 'transient' }> {
   constructor(name: Reflect<string>) {}
 }
 
-class BareImplements implements WithReflectMetadata {
+class BareImplements implements Reflectable {
   constructor() {}
 }
 Reflect.defineMetadata("design:class", {}, BareImplements);

@@ -40,11 +40,11 @@ Reflect.defineMetadata("design:paramtypes", [
 ], Warrior, undefined);
 
 // Per-property type metadata (on the prototype, keyed by property name)
-Reflect.defineMetadata("design:paramtypes", [
+Reflect.defineMetadata("design:propertytype", [
   { type: String, metadata: { optional: true } }
 ], Warrior.prototype, "name");
 
-Reflect.defineMetadata("design:paramtypes", [
+Reflect.defineMetadata("design:propertytype", [
   { type: __RFLCT_Weapon, metadata: {} }
 ], Warrior.prototype, "weapon");
 
@@ -64,7 +64,7 @@ Reflect.defineMetadata("design:symbols", Object.assign(
    metadata consumers to discover injectable properties without scanning the
    prototype chain.
 3. For each annotated property, it emits
-   `Reflect.defineMetadata("design:paramtypes", [...], ClassName.prototype, "propertyName")`
+   `Reflect.defineMetadata("design:propertytype", [...], ClassName.prototype, "propertyName")`
    with the type and metadata for that property.
 4. Property metadata uses the **prototype** as target (`Warrior.prototype`) and
    the property name as key — matching the convention that decorator-based
@@ -73,10 +73,10 @@ Reflect.defineMetadata("design:symbols", Object.assign(
 ## Combining constructor and property injection
 
 Constructor parameters and property annotations coexist naturally. The
-transformer emits separate `design:paramtypes` calls for each:
+transformer emits separate metadata calls for each:
 
-- **Constructor**: `target = ClassName`, `key = undefined`
-- **Property**: `target = ClassName.prototype`, `key = "propertyName"`
+- **Constructor**: `design:paramtypes` — `target = ClassName`, `key = undefined`
+- **Property**: `design:propertytype` — `target = ClassName.prototype`, `key = "propertyName"`
 
 A DI container can read both to build a complete injection plan for a class.
 

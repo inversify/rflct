@@ -18,7 +18,7 @@ export type Reflect<T, Metadata = {}> = T;
  * and emits `Reflect.defineMetadata("design:class", T, ClassName)`.
  */
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-export type WithReflectMetadata<T = {}> = { readonly __rflct?: T; constructor: Function };
+export type Reflectable<T = {}> = { readonly __rflct?: T; constructor: Function };
 
 /**
  * Compile-time resolution of a type's runtime identity.

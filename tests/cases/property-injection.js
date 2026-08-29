@@ -15,8 +15,8 @@ class Warrior {
 }
 Reflect.defineMetadata("design:properties", ["weapon", "name"], Warrior);
 Reflect.defineMetadata("design:paramtypes", [{ type: Number, metadata: {} }], Warrior, undefined);
-Reflect.defineMetadata("design:paramtypes", [{ type: String, metadata: { optional: true } }], Warrior.prototype, "name");
-Reflect.defineMetadata("design:paramtypes", [{ type: __RFLCT_Weapon, metadata: {} }], Warrior.prototype, "weapon");
+Reflect.defineMetadata("design:propertytype", [{ type: String, metadata: { optional: true } }], Warrior.prototype, "name");
+Reflect.defineMetadata("design:propertytype", [{ type: __RFLCT_Weapon, metadata: {} }], Warrior.prototype, "weapon");
 
 Reflect.defineMetadata("design:symbols", Object.assign(Reflect.getMetadata("design:symbols", Reflect) ?? {}, {
   "rflct-tests@0|property-injection.ts|Weapon": __RFLCT_Weapon,

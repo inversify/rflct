@@ -1,6 +1,6 @@
 {
   "name": "rflct",
-  "version": "0.0.1-alpha.2",
+  "version": "0.0.1-alpha.3",
   "description": "RFLCT — ahead-of-time reflect metadata for TypeScript 7. Injects design:symbols and design:paramtypes at build time via unplugin or the TS7 API.",
   "license": "MIT",
   "type": "module",
@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "oxc-parser": "^0.147.0",
+    "oxc-transform": "^0.147.0",
     "reflect-metadata": "^0.2.2",
     "unplugin": "^3.3.0"
   },

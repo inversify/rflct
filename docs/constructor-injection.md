@@ -53,6 +53,10 @@ Reflect.defineMetadata("design:symbols", Object.assign(
 4. The class is also registered in `design:symbols` so it can be discovered at
    runtime.
 
+> **Tip:** If every constructor parameter is injected, you can skip `Reflect<T>`
+> entirely by using `Reflectable` in the `implements` clause — see
+> [Auto-reflect](./class-metadata.md#auto-reflect-for-constructor-parameters).
+
 ## Type mapping
 
 | TypeScript type | Runtime value |
@@ -88,6 +92,8 @@ metadata type parameter.
 ## Related
 
 - [Property Injection](./property-injection.md) — metadata on class properties
+- [Class Metadata](./class-metadata.md) — `Reflectable<T>` auto-reflects
+  constructor params without needing `Reflect<T>`
 - [Method Parameters](./method-parameters.md) — metadata on method parameters
 - [Type-Only Symbols](./type-only-symbols.md) — how interfaces and type aliases
   become runtime identities

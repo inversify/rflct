@@ -63,16 +63,18 @@ metadata key namespace that the ecosystem already understands:
 
 | Key | Purpose |
 |-----|---------|
-| `design:paramtypes` | Parameter and property type metadata — same key that `emitDecoratorMetadata` used |
+| `design:paramtypes` | Parameter type metadata for constructors and methods — same key that `emitDecoratorMetadata` used |
+| `design:propertytype` | Property type metadata — per-property `{ type, metadata }` entries |
 | `design:properties` | Property name registry (new — enables property discovery without prototype scanning) |
 | `design:symbols` | Global type registry mapping qualified names to runtime identities |
-| `design:class` | Class-level metadata via `WithReflectMetadata<T>` |
+| `design:class` | Class-level metadata via `Reflectable<T>` |
 
 This is intentional. By reusing the `design:*` namespace:
 
 - **Migration is incremental.** Existing code that reads `design:paramtypes` via
-  `Reflect.getMetadata("design:paramtypes", ...)` continues to work with
-  RFLCT-generated metadata.
+  `Reflect.getMetadata("design:paramtypes", ...)` continues to work for
+  constructor and method metadata. Property metadata uses the new
+  `design:propertytype` key.
 - **No new runtime dependency.** The `reflect-metadata` polyfill is already
   installed in virtually every DI-aware TypeScript project.
 - **Interop is possible.** Libraries can consume RFLCT metadata without knowing

@@ -38,8 +38,18 @@ export function serializeTypeNode(
     case 'TSFunctionType':
     case 'TSConstructorType':
       return 'Function';
+    case 'TSLiteralType': {
+      const lit: any = node.literal;
+      if (typeof lit.value === 'string') return JSON.stringify(lit.value);
+      if (typeof lit.value === 'number' || typeof lit.value === 'boolean') return String(lit.value);
+      return 'Object';
+    }
     case 'TSParenthesizedType':
       return serializeTypeNode(node.typeAnnotation, declarations);
+    case 'TSTypeOperator':
+      if (node.operator === 'readonly')
+        return serializeTypeNode(node.typeAnnotation, declarations);
+      return 'Object';
     case 'TSTypeReference': {
       const name: string | null = identifierName(node.typeName);
       if (!name) return 'Object';

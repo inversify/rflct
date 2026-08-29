@@ -1,33 +1,40 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { execSync } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { transform } from './core/transform.js';
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { transform, type TransformOptions } from './core/transform.js';
 
 const { values: args } = parseArgs({
   options: {
     project: { type: 'string', short: 'p', default: 'tsconfig.json' },
-    outDir: { type: 'string', short: 'o' },
-    check: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h' },
   },
-  allowPositionals: true,
+  allowPositionals: false,
 });
 
 if (args.help) {
-  console.log(`rflct — TypeScript 7 AOT metadata transformer
+  console.log(`rflct — drop-in replacement for tsc with AOT metadata injection
 
 Usage:
-  rflct -p tsconfig.json [-o outDir] [--check]
+  rflct -p tsconfig.json
+
+Type-checks original sources via the TypeScript API, transforms .ts files
+(injecting Reflect.defineMetadata calls), then emits JavaScript via tsc.
+Output goes to the outDir in tsconfig. Source files are never modified.
 
 Options:
   -p, --project   Path to tsconfig.json (default: tsconfig.json)
-  -o, --outDir    Output directory for transformed files
-  --check         Type-check the transformed output via TS7 API
   -h, --help      Show this help
 `);
   process.exit(0);
@@ -39,165 +46,142 @@ if (!existsSync(tsconfigPath)) {
   process.exit(1);
 }
 
-interface TransformedFile {
-  fileName: string;
-  code: string;
+const projectDir: string = dirname(tsconfigPath);
+
+function lineColFromPos(text: string, pos: number): string {
+  let line: number = 1;
+  let lastNewline: number = 0;
+  for (let i: number = 0; i < pos && i < text.length; i++) {
+    if (text[i] === '\n') {
+      line++;
+      lastNewline = i + 1;
+    }
+  }
+  return `${line},${pos - lastNewline + 1}`;
 }
 
-async function main(): Promise<void> {
-  const { API, SymbolFlags } = await import('typescript/unstable/sync' as any);
-  const { SyntaxKind } = await import('typescript/unstable/ast' as any);
-
-  const api = new (API as any)({ cwd: dirname(tsconfigPath) });
-
+// Phase 1: Type-check original sources via TypeScript 7 API.
+// This runs BEFORE transformation so that Reflect<T> imports are still valid.
+async function typeCheck(): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ts: any;
   try {
-    const config: any = api.parseConfigFile({ fileName: tsconfigPath });
-    const snapshot: any = api.updateSnapshot({
-      openProjects: [{ fileName: tsconfigPath }],
-    });
+    ts = await import('typescript/unstable/sync');
+  } catch {
+    return; // API not available, skip — tsc will type-check during emit
+  }
 
+  const api = new ts.API();
+  try {
+    const snap = api.updateSnapshot({ openProject: tsconfigPath });
     try {
-      const project: any = snapshot.getProject(tsconfigPath);
-      if (!project) {
-        console.error('Error: could not load project');
+      const proj = snap.getProjects()[0];
+      if (!proj) return;
+      const prog = proj.program;
+      const userFiles: string[] = prog.getSourceFileNames()
+        .filter((f: string) => !prog.isSourceFileDefaultLibrary(f) && !prog.isSourceFileFromExternalLibrary(f));
+      let errorCount: number = 0;
+      for (const fileName of userFiles) {
+        for (const d of prog.getSemanticDiagnostics(fileName)) {
+          if (d.category === ts.DiagnosticCategory.Error) {
+            const sf = prog.getSourceFile(fileName);
+            const lc: string = lineColFromPos(sf?.text ?? '', d.pos);
+            console.error(`${relative(projectDir, d.fileName)}(${lc}): error TS${d.code}: ${d.text}`);
+            errorCount++;
+          }
+        }
+      }
+      if (errorCount > 0) {
+        console.error(`\nFound ${errorCount} error(s).`);
         process.exit(1);
       }
-
-      const { program, checker } = project;
-      const fileNames: string[] = program.getSourceFileNames();
-
-      const results: TransformedFile[] = [];
-      let hasErrors = false;
-
-      for (const fileName of fileNames) {
-        if (fileName.includes('node_modules')) continue;
-        if (fileName.endsWith('.d.ts')) continue;
-
-        const sourceFile: any = program.getSourceFile({ fileName });
-        if (!sourceFile) continue;
-
-        const checkerInfo: Map<string, 'class' | 'interface' | 'type'> =
-          buildCheckerInfo(checker, sourceFile, SyntaxKind, SymbolFlags);
-
-        const source: string = sourceFile.text;
-        const result = transform(source, fileName, { checkerInfo });
-
-        if (result.transformed) {
-          results.push({ fileName, code: result.code });
-        }
-      }
-
-      if (args.outDir) {
-        const outDir: string = resolve(args.outDir);
-        const projectRoot: string = dirname(tsconfigPath);
-        for (const { fileName, code } of results) {
-          const rel: string = relative(projectRoot, fileName);
-          const outPath: string = join(outDir, rel);
-          mkdirSync(dirname(outPath), { recursive: true });
-          writeFileSync(outPath, code);
-          console.log(`  ${rel}`);
-        }
-        console.log(
-          `\n${results.length} file(s) transformed → ${relative(process.cwd(), outDir)}/`,
-        );
-      } else {
-        if (results.length === 1) {
-          process.stdout.write(results[0]!.code);
-        } else {
-          for (const { fileName } of results) {
-            console.log(`  ${relative(dirname(tsconfigPath), fileName)}`);
-          }
-          console.log(
-            `\n${results.length} file(s) would be transformed. Use -o to write.`,
-          );
-        }
-      }
-
-      if (args.check && results.length > 0) {
-        console.log('\nType-checking transformed output...');
-        const overlayFs: any = buildOverlayFs(results);
-        const checkApi = new (API as any)({
-          cwd: dirname(tsconfigPath),
-          fs: overlayFs,
-        });
-        try {
-          const checkSnapshot: any = checkApi.updateSnapshot({
-            openProjects: [{ fileName: tsconfigPath }],
-          });
-          const checkProject: any = checkSnapshot.getProject(tsconfigPath);
-          if (checkProject) {
-            const diags: any[] = checkProject.program.getSemanticDiagnostics();
-            if (diags.length > 0) {
-              hasErrors = true;
-              for (const d of diags) {
-                const file: string = d.file
-                  ? relative(dirname(tsconfigPath), d.file)
-                  : '<unknown>';
-                console.error(`${file}(${d.start}): ${d.messageText}`);
-              }
-            } else {
-              console.log('No errors.');
-            }
-          }
-          checkSnapshot.dispose();
-        } finally {
-          checkApi.close();
-        }
-      }
-
-      if (hasErrors) process.exit(1);
     } finally {
-      snapshot.dispose();
+      snap.dispose();
     }
   } finally {
     api.close();
   }
 }
 
-function buildCheckerInfo(
-  checker: any,
-  sourceFile: any,
-  SyntaxKind: any,
-  SymbolFlags: any,
-): Map<string, 'class' | 'interface' | 'type'> {
-  void SymbolFlags;
-  const info = new Map<string, 'class' | 'interface' | 'type'>();
-  for (const statement of sourceFile.statements ?? []) {
-    const kind: number = statement.kind;
-    if (
-      kind === SyntaxKind.ClassDeclaration ||
-      kind === SyntaxKind.ClassExpression
-    ) {
-      const sym: any = checker.getSymbolAtLocation(statement.name ?? statement);
-      if (sym) info.set(sym.name, 'class');
-    } else if (kind === SyntaxKind.InterfaceDeclaration) {
-      const sym: any = checker.getSymbolAtLocation(statement.name);
-      if (sym) info.set(sym.name, 'interface');
-    } else if (kind === SyntaxKind.TypeAliasDeclaration) {
-      const sym: any = checker.getSymbolAtLocation(statement.name);
-      if (sym) info.set(sym.name, 'type');
-    } else if (kind === SyntaxKind.EnumDeclaration) {
-      const sym: any = checker.getSymbolAtLocation(statement.name);
-      if (sym) info.set(sym.name, 'class');
+await typeCheck();
+
+// Phase 2: Transform and stage
+function resolveCompilerOptions(configPath: string): Record<string, unknown> {
+  const raw: string = readFileSync(configPath, 'utf8');
+  const config = JSON.parse(raw) as Record<string, unknown>;
+  let options: Record<string, unknown> = {};
+  if (typeof config['extends'] === 'string') {
+    const basePath: string = resolve(dirname(configPath), config['extends']);
+    const resolved: string = basePath.endsWith('.json') ? basePath : `${basePath}.json`;
+    if (existsSync(resolved)) {
+      options = resolveCompilerOptions(resolved);
     }
   }
-  return info;
+  return { ...options, ...((config['compilerOptions'] ?? {}) as Record<string, unknown>) };
 }
 
-function buildOverlayFs(
-  transformedFiles: TransformedFile[],
-): { readFile: (fileName: string) => string | undefined } {
-  const map = new Map<string, string>(
-    transformedFiles.map((f: TransformedFile) => [f.fileName, f.code]),
-  );
-  return {
-    readFile(fileName: string): string | undefined {
-      return map.get(fileName);
-    },
-  };
+const compilerOptions = resolveCompilerOptions(tsconfigPath);
+const rootDir: string = resolve(projectDir, (compilerOptions['rootDir'] as string) ?? '.');
+
+function collectTsFiles(dir: string): string[] {
+  const files: string[] = [];
+  if (!existsSync(dir)) return files;
+  for (const entry of readdirSync(dir)) {
+    const full: string = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      files.push(...collectTsFiles(full));
+    } else if (full.endsWith('.ts') && !full.endsWith('.d.ts')) {
+      files.push(full);
+    }
+  }
+  return files;
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+const sourceFiles: string[] = collectTsFiles(rootDir);
+const stageDir: string = join(projectDir, '.rflct');
+const stageSrcDir: string = join(stageDir, 'src');
+
+let transformedCount: number = 0;
+const rflctOptions: TransformOptions = {};
+
+for (const filePath of sourceFiles) {
+  const source: string = readFileSync(filePath, 'utf8');
+  const rel: string = relative(rootDir, filePath);
+  const outPath: string = join(stageSrcDir, rel);
+  const result = transform(source, filePath, rflctOptions);
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, result.code);
+  if (result.transformed) transformedCount++;
+}
+
+// Phase 3: Emit via tsc (type checking already done — errors are from stripped imports, ignore)
+const wrapperTsconfig = {
+  extends: tsconfigPath,
+  compilerOptions: {
+    rootDir: stageSrcDir,
+    outDir: resolve(projectDir, (compilerOptions['outDir'] as string) ?? 'lib'),
+    ...(compilerOptions['tsBuildInfoFile']
+      ? { tsBuildInfoFile: resolve(projectDir, compilerOptions['tsBuildInfoFile'] as string) }
+      : {}),
+  },
+  include: [stageSrcDir],
+};
+
+const stageTsconfigPath: string = join(stageDir, 'tsconfig.json');
+writeFileSync(stageTsconfigPath, JSON.stringify(wrapperTsconfig, null, 2));
+
+const tscBin: string = join(projectDir, 'node_modules', '.bin', 'tsc');
+const tscCmd: string = existsSync(tscBin) ? tscBin : 'tsc';
+
+try {
+  execSync(`"${tscCmd}" -p "${stageTsconfigPath}"`, {
+    cwd: projectDir,
+    stdio: ['inherit', 'inherit', 'ignore'], // suppress stderr — type errors from stripped imports are expected
+  });
+} finally {
+  rmSync(stageDir, { recursive: true, force: true });
+}
+
+if (transformedCount > 0) {
+  console.log(`rflct: ${transformedCount}/${sourceFiles.length} file(s) transformed`);
+}

@@ -8,6 +8,7 @@ const TS_RE = /\.[cm]?tsx?$/;
 export const unplugin = createUnplugin((options?: TransformOptions) => {
   const include: RegExp = options?.include ?? TS_RE;
   const exclude: RegExp = options?.exclude ?? /node_modules/;
+  const pluginOptions: TransformOptions = { transpile: true, ...options };
 
   return {
     name: PLUGIN_NAME,
@@ -19,9 +20,9 @@ export const unplugin = createUnplugin((options?: TransformOptions) => {
     },
 
     transform(source: string, id: string) {
-      const result = transform(source, id, options);
+      const result = transform(source, id, pluginOptions);
       if (!result.transformed) return null;
-      return { code: result.code, map: null };
+      return { code: result.code, map: result.map ?? null };
     },
   };
 });

@@ -1,8 +1,8 @@
-# 🪞 RFLCT: Runtime type metadata in TS 7.0+ No `--emitDecoratorMetadata` or decorators required
+# 🪞 RFLCT: Runtime type metadata in TS 7.0+ No `--emitDecoratorMetadata`or decorators required
 
 Ahead-of-time reflect metadata for TypeScript 7. Injects `design:symbols`,
-`design:paramtypes`, `design:properties`, and `design:class` at build time — no
-decorators, no `emitDecoratorMetadata`.
+`design:paramtypes`, `design:propertytype`, `design:properties`, and `design:class`
+at build time — no decorators, no `emitDecoratorMetadata`.
 
 Integrates with any build tool via [unplugin](https://github.com/unjs/unplugin)
 (Vite, Rollup, webpack, esbuild), or use the CLI with the TypeScript 7 API for
@@ -34,6 +34,28 @@ class Polygon {
 container.bind(resolve<Shape>()).to(Polygon);
 ```
 
+### Auto-reflect with `Reflectable`
+
+When a class implements `Reflectable`, constructor parameters are
+reflected automatically — no `Reflect<T>` needed:
+
+```ts
+import { Reflectable, resolve } from "rflct";
+
+interface Shape { sides: number; }
+
+class Polygon implements Reflectable {
+  constructor(
+    public shape: Shape,
+    public label: string
+  ) {}
+}
+```
+
+Both forms produce identical metadata. Use `Reflect<T, M>` when you need
+per-parameter metadata (optionality, names, tags), or `Reflectable`
+when every constructor parameter is injected with default metadata.
+
 After transformation:
 
 ```js
@@ -49,7 +71,7 @@ Reflect.defineMetadata("design:paramtypes", [
 ], Polygon, undefined);
 
 Reflect.defineMetadata("design:properties", ["color"], Polygon);
-Reflect.defineMetadata("design:paramtypes", [
+Reflect.defineMetadata("design:propertytype", [
   { type: String, metadata: { optional: true } }
 ], Polygon.prototype, "color");
 
@@ -74,18 +96,20 @@ Reflect.defineMetadata("design:symbols", Object.assign(
 | [Resolve Calls](docs/resolve-calls.md) | `resolve<T>()` — compile-time type resolution for DI bindings and map keys |
 | [Multi-Injection](docs/multi-injection.md) | `Reflect<T[]>` — array types with `elementType` for injecting collections |
 | [Metadata Arguments](docs/metadata-arguments.md) | `Reflect<T, M>` — attaching arbitrary metadata (optionality, constraints, names) |
-| [Class Metadata](docs/class-metadata.md) | `WithReflectMetadata<T>` — class-level metadata via `implements` clauses |
+| [Class Metadata](docs/class-metadata.md) | `Reflectable<T>` — class-level metadata via `implements` clauses, auto-reflect for constructor params |
 | [Type-Only Symbols](docs/type-only-symbols.md) | How interfaces and type aliases get stable `Symbol.for(...)` runtime identities |
 | [Symbol Qualification](docs/symbol-qualification.md) | The `package@major\|path\|Name` format and cross-package interop guarantees |
+| [Internals](docs/internals.md) | Architecture — transform pipeline, CLI vs unplugin, type serialization, module structure |
 
 ## Four transformations
 
 | # | Metadata key | What it does |
 |---|-------------|--------------|
 | 1 | `design:symbols` | Global type registry — every class, interface, and type alias is registered process-wide |
-| 2 | `design:paramtypes` | Parameter and property type metadata — `{ type, metadata }` entries for constructors, methods, and properties |
+| 2 | `design:paramtypes` | Parameter type metadata — `{ type, metadata }` entries for constructors and methods |
+| 2b | `design:propertytype` | Property type metadata — `{ type, metadata }` entries for class properties |
 | 3 | `design:properties` | Property name registry — lists which properties on a class carry `Reflect<T>` annotations |
-| 4 | `design:class` | Class-level metadata via `WithReflectMetadata<T>` in `implements` clauses |
+| 4 | `design:class` | Class-level metadata via `Reflectable<T>` in `implements` clauses |
 
 `resolve<T>()` is a fifth transformation that replaces calls with the runtime
 identity of `T` at compile time.
@@ -107,6 +131,12 @@ that the generated code relies on. Do **not** import it in every file — a sing
 import per process is sufficient.
 
 ## Usage with build tools (unplugin)
+
+The plugin runs with `enforce: 'pre'` and outputs **JavaScript** by default
+(types are stripped via `oxc-transform`), so it works regardless of what
+TypeScript transpiler the consumer has — or doesn't have. Pass
+`{ transpile: false }` to output TypeScript instead and let the bundler's own TS
+plugin handle type stripping.
 
 ### Vite
 
@@ -156,17 +186,16 @@ await esbuild.build({
 For standalone `tsgo` projects without a bundler:
 
 ```bash
-npx rflct -p tsconfig.json -o dist
+npx rflct -p tsconfig.json
 ```
 
 Options:
 - `-p, --project` — path to tsconfig.json (default: `tsconfig.json`)
-- `-o, --outDir` — output directory for transformed files
-- `--check` — type-check the transformed output via the TS7 API
+- `-h, --help` — show help
 
-The CLI uses the TypeScript 7 API (`typescript/unstable/sync`) to load the
-program, resolve types via the checker, and optionally validate the result
-through VFS overlays.
+The CLI type-checks original sources via the TypeScript 7 API
+(`typescript/unstable/sync`), then transforms and emits JavaScript.
+Output goes to the `outDir` specified in your tsconfig.
 
 ## API
 
@@ -177,10 +206,10 @@ through VFS overlays.
 type Reflect<T, Metadata = {}> = T;
 
 // Phantom type for class-level metadata via implements clauses.
-type WithReflectMetadata<T = {}> = { ... };
+type Reflectable<T = {}> = { ... };
 
 // Compile-time resolution — replaced by the transformer.
-function resolve<T>(value?: new (...args: any[]) => T): symbol | (new (...args: any[]) => T);
+function resolve<T>(value?: abstract new (...args: any[]) => T): symbol | (abstract new (...args: any[]) => T);
 ```
 
 ### Programmatic transform
@@ -188,9 +217,15 @@ function resolve<T>(value?: new (...args: any[]) => T): symbol | (new (...args: 
 ```js
 import { transform } from "rflct/transform";
 
+// Output TypeScript (metadata injected, types intact)
 const result = transform(source, fileName);
-// result.code — transformed source (still TypeScript, ready for type-stripping)
+// result.code        — transformed source
 // result.transformed — whether any changes were made
+
+// Output JavaScript (types stripped via oxc-transform)
+const result = transform(source, fileName, { transpile: true });
+// result.code — JavaScript output
+// result.map  — source map (JSON string)
 ```
 
 ## License
