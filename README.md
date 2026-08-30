@@ -1,4 +1,6 @@
-# 🪞 RFLCT: Runtime type metadata in TS 7.0+ No `--emitDecoratorMetadata`or decorators required
+<img src="RFLCT.png" alt="RFLCT Logo" width="200" height="auto" />
+
+# RFLCT: Runtime type metadata in TS 7.0+ No `--emitDecoratorMetadata`or decorators required
 
 Ahead-of-time reflect metadata for TypeScript 7. Injects `design:symbols`,
 `design:paramtypes`, `design:propertytype`, `design:properties`, and `design:class`
