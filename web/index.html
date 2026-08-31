@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RFLCT — Ahead-of-time reflection metadata for TypeScript 7</title>
+<meta name="description" content="Generate runtime type metadata at build time — without decorators or emitDecoratorMetadata." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#09090b;--bg-card:#18181b;--bg-code:#111113;
+  --text:#fafafa;--text-muted:#a1a1aa;--text-dim:#71717a;
+  --accent:#6366f1;--accent-hover:#818cf8;--accent-glow:rgba(99,102,241,.15);
+  --border:#27272a;--border-light:#3f3f46;
+  --radius:12px;--radius-sm:8px;
+  --font-sans:'Inter',system-ui,-apple-system,sans-serif;
+  --font-mono:'JetBrains Mono','Fira Code',monospace;
+  --max-w:1120px;
+}
+html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none;transition:color .15s}
+a:hover{color:var(--accent-hover)}
+
+/* ── NAV ── */
+nav{position:sticky;top:0;z-index:100;background:rgba(9,9,11,.85);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+.nav-inner{max-width:var(--max-w);margin:0 auto;padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between}
+.nav-logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.1rem;letter-spacing:-.02em}
+.nav-logo img{height:28px;width:auto}
+.nav-links{display:flex;align-items:center;gap:28px;font-size:.875rem;font-weight:500}
+.nav-links a{color:var(--text-muted)}
+.nav-links a:hover{color:var(--text)}
+.nav-cta{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;background:var(--accent);color:#fff!important;border-radius:var(--radius-sm);font-size:.8125rem;font-weight:600;transition:background .15s}
+.nav-cta:hover{background:var(--accent-hover)}
+.nav-gh{color:var(--text-muted)!important;display:inline-flex}
+.nav-gh:hover{color:var(--text)!important}
+.mobile-toggle{display:none;background:none;border:none;color:var(--text);cursor:pointer}
+
+/* ── HERO ── */
+.hero{position:relative;padding:100px 24px 80px;text-align:center;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);width:800px;height:800px;background:radial-gradient(circle,rgba(99,102,241,.12) 0%,transparent 70%);pointer-events:none}
+.hero-badge{display:inline-block;padding:5px 14px;background:var(--accent-glow);border:1px solid rgba(99,102,241,.25);border-radius:100px;font-size:.75rem;font-weight:600;color:var(--accent-hover);letter-spacing:.03em;margin-bottom:24px}
+.hero h1{font-size:clamp(2.5rem,6vw,4rem);font-weight:800;letter-spacing:-.03em;line-height:1.1;max-width:720px;margin:0 auto 20px}
+.hero h1 span{background:linear-gradient(135deg,var(--accent),#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:1.15rem;color:var(--text-muted);max-width:560px;margin:0 auto 36px;line-height:1.7}
+.hero-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:56px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border-radius:var(--radius-sm);font-size:.9rem;font-weight:600;transition:all .15s;border:none;cursor:pointer}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-hover);color:#fff}
+.btn-secondary{background:var(--bg-card);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--border-light);color:var(--text)}
+
+/* ── TRANSFORM VISUAL ── */
+.transform-visual{max-width:880px;margin:0 auto;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:0}
+.transform-visual pre{background:var(--bg-code);border:1px solid var(--border);border-radius:var(--radius);padding:24px;font-family:var(--font-mono);font-size:.8125rem;line-height:1.7;overflow-x:auto;text-align:left}
+.transform-arrow{display:flex;flex-direction:column;align-items:center;gap:4px;padding:0 20px;color:var(--accent);font-size:1.5rem;font-weight:700}
+.transform-arrow span{font-size:.65rem;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em}
+
+/* ── SECTIONS ── */
+section{padding:80px 24px}
+.section-inner{max-width:var(--max-w);margin:0 auto}
+.section-label{font-size:.75rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
+.section-title{font-size:clamp(1.75rem,4vw,2.5rem);font-weight:800;letter-spacing:-.025em;margin-bottom:16px}
+.section-desc{font-size:1.05rem;color:var(--text-muted);max-width:600px;line-height:1.7;margin-bottom:48px}
+
+/* ── CARDS GRID ── */
+.cards{display:grid;gap:16px}
+.cards-3{grid-template-columns:repeat(3,1fr)}
+.cards-2{grid-template-columns:repeat(2,1fr)}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:28px}
+.card-icon{width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:var(--accent-glow);border-radius:var(--radius-sm);margin-bottom:16px;font-size:1.1rem}
+.card h3{font-size:1rem;font-weight:700;margin-bottom:8px}
+.card p{font-size:.875rem;color:var(--text-muted);line-height:1.6}
+.card code{font-family:var(--font-mono);font-size:.8rem;color:var(--accent-hover);background:rgba(99,102,241,.1);padding:2px 6px;border-radius:4px}
+
+/* ── STEPS ── */
+.steps{display:flex;flex-direction:column;gap:40px;position:relative;padding-left:40px}
+.steps::before{content:'';position:absolute;left:15px;top:8px;bottom:8px;width:2px;background:var(--border)}
+.step{position:relative}
+.step-num{position:absolute;left:-40px;top:2px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:var(--accent);color:#fff;border-radius:50%;font-size:.75rem;font-weight:700}
+.step h3{font-size:1.05rem;font-weight:700;margin-bottom:8px}
+.step p{font-size:.9rem;color:var(--text-muted);margin-bottom:12px}
+.step pre{background:var(--bg-code);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;font-family:var(--font-mono);font-size:.8rem;line-height:1.7;overflow-x:auto}
+
+/* ── MIGRATION SIDE-BY-SIDE ── */
+.migration{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.migration-col{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.migration-header{padding:12px 20px;border-bottom:1px solid var(--border);font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em}
+.migration-header.before{color:#f87171}
+.migration-header.after{color:#34d399}
+.migration-col pre{padding:20px;font-family:var(--font-mono);font-size:.8rem;line-height:1.7;background:transparent;border:none}
+
+/* ── TABLE ── */
+.meta-table{width:100%;border-collapse:collapse;font-size:.875rem}
+.meta-table th{text-align:left;padding:12px 16px;border-bottom:2px solid var(--border);color:var(--text-muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em}
+.meta-table td{padding:12px 16px;border-bottom:1px solid var(--border)}
+.meta-table td:first-child{font-family:var(--font-mono);font-size:.8125rem;color:var(--accent-hover);white-space:nowrap}
+.meta-table tr:last-child td{border-bottom:none}
+.meta-table-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+
+/* ── BUILD TOOLS ── */
+.tools-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.tool-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;text-align:center;transition:border-color .15s}
+.tool-card:hover{border-color:var(--border-light)}
+.tool-card h3{font-size:1rem;font-weight:700;margin-bottom:12px}
+.tool-card pre{background:var(--bg-code);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;font-family:var(--font-mono);font-size:.7rem;line-height:1.6;text-align:left;overflow-x:auto}
+
+/* ── FAQ ── */
+.faq-list{display:flex;flex-direction:column;gap:2px}
+.faq-item{background:var(--bg-card);border:1px solid var(--border);padding:0;border-radius:var(--radius-sm);overflow:hidden}
+.faq-item:first-child{border-radius:var(--radius) var(--radius) var(--radius-sm) var(--radius-sm)}
+.faq-item:last-child{border-radius:var(--radius-sm) var(--radius-sm) var(--radius) var(--radius)}
+.faq-q{width:100%;padding:18px 24px;background:none;border:none;color:var(--text);font-family:var(--font-sans);font-size:.925rem;font-weight:600;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.faq-q::after{content:'+';font-size:1.2rem;color:var(--text-dim);transition:transform .2s}
+.faq-item.open .faq-q::after{transform:rotate(45deg)}
+.faq-a{max-height:0;overflow:hidden;transition:max-height .3s ease}
+.faq-item.open .faq-a{max-height:200px}
+.faq-a p{padding:0 24px 18px;font-size:.875rem;color:var(--text-muted);line-height:1.6}
+
+/* ── FOOTER ── */
+footer{border-top:1px solid var(--border);padding:40px 24px}
+.footer-inner{max-width:var(--max-w);margin:0 auto;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px}
+.footer-brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:.95rem}
+.footer-brand img{height:22px;width:auto}
+.footer-links{display:flex;gap:24px;font-size:.8125rem}
+.footer-links a{color:var(--text-dim)}
+.footer-links a:hover{color:var(--text-muted)}
+.footer-copy{font-size:.75rem;color:var(--text-dim);width:100%;text-align:center;margin-top:12px}
+
+/* ── SYNTAX HIGHLIGHTING (minimal) ── */
+.kw{color:#c084fc}.str{color:#34d399}.cm{color:#71717a}.fn{color:#60a5fa}.ty{color:#f9a8d4}.op{color:#a1a1aa}.num{color:#fbbf24}
+
+/* ── RESPONSIVE ── */
+@media(max-width:768px){
+  .nav-links{display:none}
+  .mobile-toggle{display:block}
+  .cards-3{grid-template-columns:1fr}
+  .cards-2{grid-template-columns:1fr}
+  .transform-visual{grid-template-columns:1fr;gap:16px}
+  .transform-arrow{flex-direction:row;padding:8px 0}
+  .migration{grid-template-columns:1fr}
+  .tools-grid{grid-template-columns:1fr 1fr}
+  .hero{padding:64px 24px 48px}
+}
+@media(max-width:480px){
+  .tools-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- ── NAV ── -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="nav-logo"><img src="./RFLCT.png" alt="RFLCT" /> RFLCT</a>
+    <div class="nav-links">
+      <a href="#why">Why RFLCT</a>
+      <a href="#how">How It Works</a>
+      <a href="#features">Features</a>
+      <a href="#integrations">Integrations</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/inversify/rflct" class="nav-gh" target="_blank" rel="noopener">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <a href="#quickstart" class="nav-cta">Get Started</a>
+    </div>
+    <button class="mobile-toggle" onclick="document.querySelector('.nav-links').style.display=document.querySelector('.nav-links').style.display==='flex'?'none':'flex'" aria-label="Toggle menu">
+      <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="hero-badge">TypeScript 7+ Ready</div>
+  <h1>TypeScript reflection, <span>without decorators</span></h1>
+  <p>Generate runtime type metadata at build time — without decorators or <code style="font-family:var(--font-mono);font-size:.9rem;background:rgba(99,102,241,.12);padding:2px 7px;border-radius:4px">emitDecoratorMetadata</code>.</p>
+  <div class="hero-actions">
+    <a href="#quickstart" class="btn btn-primary">Get Started</a>
+    <a href="https://github.com/inversify/rflct" target="_blank" rel="noopener" class="btn btn-secondary">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+
+  <div class="transform-visual">
+    <pre><span class="kw">class</span> <span class="ty">UserService</span> {
+  <span class="fn">constructor</span>(
+    <span class="kw">public</span> repo: <span class="ty">Reflect</span>&lt;<span class="ty">UserRepository</span>&gt;
+  ) {}
+}</pre>
+    <div class="transform-arrow">
+      <span>RFLCT</span>
+      →
+    </div>
+    <pre><span class="ty">Reflect</span>.<span class="fn">defineMetadata</span>(
+  <span class="str">"design:paramtypes"</span>,
+  [{ <span class="fn">type</span>: <span class="ty">UserRepository</span> }],
+  <span class="ty">UserService</span>
+);</pre>
+  </div>
+</section>
+
+<!-- ── WHY ── -->
+<section id="why">
+  <div class="section-inner">
+    <div class="section-label">The Problem</div>
+    <h2 class="section-title">Why RFLCT?</h2>
+    <p class="section-desc">TypeScript's <code>emitDecoratorMetadata</code> was never part of the TC39 standard and is being removed. RFLCT moves reflection metadata generation from runtime decorator behavior to the build step.</p>
+    <div class="cards cards-3">
+      <div class="card">
+        <div class="card-icon">✦</div>
+        <h3>No decorators</h3>
+        <p>Use standard TypeScript syntax. Mark parameters with <code>Reflect&lt;T&gt;</code> — a plain type annotation, not a decorator.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h3>No emitDecoratorMetadata</h3>
+        <p>Metadata is generated by RFLCT at compile time. No legacy compiler flags needed.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">◆</div>
+        <h3>TypeScript 7 ready</h3>
+        <p>Designed around the TypeScript 7 compiler API and the modern <code>tsgo</code> toolchain.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── HOW IT WORKS ── -->
+<section id="how" style="background:var(--bg-card)">
+  <div class="section-inner">
+    <div class="section-label">Overview</div>
+    <h2 class="section-title">How RFLCT works</h2>
+    <p class="section-desc">Type information is resolved at build time, not discovered through decorators at runtime.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Write TypeScript</h3>
+        <p>Annotate constructor parameters, properties, or method parameters with <code>Reflect&lt;T&gt;</code>.</p>
+        <pre><span class="kw">class</span> <span class="ty">Service</span> {
+  <span class="fn">constructor</span>(repo: <span class="ty">Reflect</span>&lt;<span class="ty">Repository</span>&gt;) {}
+}</pre>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>RFLCT transforms it</h3>
+        <p>At build time, RFLCT analyzes the type annotations and generates metadata calls.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Runtime metadata is generated</h3>
+        <p>The output uses the same <code>Reflect.defineMetadata</code> API the ecosystem already understands.</p>
+        <pre><span class="ty">Reflect</span>.<span class="fn">defineMetadata</span>(
+  <span class="str">"design:paramtypes"</span>,
+  [{ <span class="fn">type</span>: <span class="ty">Repository</span>, <span class="fn">metadata</span>: {} }],
+  <span class="ty">Service</span>
+);</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── QUICK START ── -->
+<section id="quickstart">
+  <div class="section-inner">
+    <div class="section-label">Get Started</div>
+    <h2 class="section-title">Quick Start</h2>
+    <p class="section-desc">Up and running in under a minute.</p>
+    <div class="cards cards-2">
+      <div class="card">
+        <h3>1. Install</h3>
+        <pre style="margin-top:12px">npm install rflct reflect-metadata</pre>
+        <p style="margin-top:12px">Import <code>reflect-metadata</code> once at your entry point — RFLCT generates metadata compatible with the existing <code>Reflect.defineMetadata</code> / <code>Reflect.getMetadata</code> ecosystem.</p>
+        <pre style="margin-top:12px"><span class="kw">import</span> <span class="str">"reflect-metadata"</span>;</pre>
+      </div>
+      <div class="card">
+        <h3>2. Annotate your code</h3>
+        <pre style="margin-top:12px"><span class="kw">import</span> { Reflect } <span class="kw">from</span> <span class="str">"rflct"</span>;
+
+<span class="kw">class</span> <span class="ty">Service</span> {
+  <span class="fn">constructor</span>(
+    <span class="kw">public</span> repository: <span class="ty">Reflect</span>&lt;<span class="ty">Repository</span>&gt;
+  ) {}
+}</pre>
+        <p style="margin-top:12px">RFLCT resolves <code>Reflect&lt;Repository&gt;</code> → <code>design:paramtypes</code> → runtime metadata at compile time.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── DI USE CASE ── -->
+<section style="background:var(--bg-card)">
+  <div class="section-inner">
+    <div class="section-label">Use Case</div>
+    <h2 class="section-title">Built for dependency injection</h2>
+    <p class="section-desc">Interfaces and type aliases don't exist at runtime. RFLCT gives them stable runtime identities so they can participate in dependency injection.</p>
+    <div class="cards cards-2">
+      <div class="card">
+        <h3>resolve&lt;T&gt;()</h3>
+        <p style="margin-bottom:12px">Resolve a TypeScript type to its runtime identity at build time — perfect for DI container bindings.</p>
+        <pre><span class="kw">import</span> { resolve } <span class="kw">from</span> <span class="str">"rflct"</span>;
+
+container
+  .<span class="fn">bind</span>(<span class="fn">resolve</span>&lt;<span class="ty">Shape</span>&gt;())
+  .<span class="fn">to</span>(<span class="ty">Polygon</span>);</pre>
+      </div>
+      <div class="card">
+        <h3>Type-only symbols</h3>
+        <p style="margin-bottom:12px">Interfaces get stable <code>Symbol.for(...)</code> identities that are consistent across packages and builds.</p>
+        <pre><span class="cm">// Generated at build time:</span>
+<span class="kw">const</span> __RFLCT_Shape =
+  <span class="ty">Symbol</span>.<span class="fn">for</span>(
+    <span class="str">"@acme/shapes@1|src/geo.ts|Shape"</span>
+  );</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FEATURES ── -->
+<section id="features">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Core Features</h2>
+    <p class="section-desc">Everything you need for compile-time reflection metadata.</p>
+    <div class="cards cards-3">
+      <div class="card">
+        <h3><code>Reflect&lt;T&gt;</code></h3>
+        <p>Mark constructor parameters and properties for metadata generation.</p>
+      </div>
+      <div class="card">
+        <h3><code>resolve&lt;T&gt;()</code></h3>
+        <p>Resolve a TypeScript type to its runtime identity at build time.</p>
+      </div>
+      <div class="card">
+        <h3>Constructor injection</h3>
+        <p>Generate <code>design:paramtypes</code> metadata for constructor parameters.</p>
+      </div>
+      <div class="card">
+        <h3>Property injection</h3>
+        <p>Generate <code>design:properties</code> and per-property type metadata.</p>
+      </div>
+      <div class="card">
+        <h3>Method parameters</h3>
+        <p>Generate metadata for method parameters on the prototype.</p>
+      </div>
+      <div class="card">
+        <h3><code>Reflect&lt;T, M&gt;</code></h3>
+        <p>Attach additional metadata — optionality, constraints, names, tags.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── METADATA KEYS ── -->
+<section style="background:var(--bg-card)">
+  <div class="section-inner">
+    <div class="section-label">Internals</div>
+    <h2 class="section-title">The five metadata keys</h2>
+    <p class="section-desc">RFLCT generates five well-defined metadata keys — the same <code>design:*</code> convention the ecosystem already understands.</p>
+    <div class="meta-table-wrap">
+      <table class="meta-table">
+        <thead><tr><th>Key</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>design:symbols</td><td>Global type / runtime identity registry — every class, interface, and type alias</td></tr>
+          <tr><td>design:paramtypes</td><td>Constructor, method, and property type metadata</td></tr>
+          <tr><td>design:propertytype</td><td>Per-property type metadata with <code>{ type, metadata }</code> entries</td></tr>
+          <tr><td>design:properties</td><td>Lists which properties on a class carry <code>Reflect&lt;T&gt;</code> annotations</td></tr>
+          <tr><td>design:class</td><td>Class-level metadata via <code>Reflectable&lt;T&gt;</code> in <code>implements</code> clauses</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:16px;font-size:.875rem;color:var(--text-dim)"><code>resolve&lt;T&gt;()</code> is an additional transformation that replaces calls with the runtime identity of <code>T</code> at compile time.</p>
+  </div>
+</section>
+
+<!-- ── MIGRATION ── -->
+<section id="migration">
+  <div class="section-inner">
+    <div class="section-label">Migration</div>
+    <h2 class="section-title">From decorators to RFLCT</h2>
+    <p class="section-desc">Keep the runtime reflection ecosystem. Replace decorator-based metadata generation with compile-time type analysis.</p>
+    <div class="migration">
+      <div class="migration-col">
+        <div class="migration-header before">Before — decorators</div>
+        <pre><span class="fn">@injectable</span>()
+<span class="kw">class</span> <span class="ty">UserService</span> {
+  <span class="fn">constructor</span>(
+    <span class="kw">private</span> repo: <span class="ty">UserRepository</span>
+  ) {}
+}</pre>
+      </div>
+      <div class="migration-col">
+        <div class="migration-header after">After — RFLCT</div>
+        <pre><span class="kw">class</span> <span class="ty">UserService</span> {
+  <span class="fn">constructor</span>(
+    <span class="kw">private</span> repo: <span class="ty">Reflect</span>&lt;<span class="ty">UserRepository</span>&gt;
+  ) {}
+}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── BUILD TOOLS ── -->
+<section id="integrations" style="background:var(--bg-card)">
+  <div class="section-inner">
+    <div class="section-label">Integrations</div>
+    <h2 class="section-title">Works with your build system</h2>
+    <p class="section-desc">Powered by unplugin — one plugin, every build tool.</p>
+    <div class="tools-grid">
+      <div class="tool-card">
+        <h3>Vite</h3>
+        <pre><span class="kw">import</span> { vitePlugin }
+  <span class="kw">from</span> <span class="str">"rflct/vite"</span>;
+
+<span class="kw">export default</span> {
+  plugins: [<span class="fn">vitePlugin</span>()]
+};</pre>
+      </div>
+      <div class="tool-card">
+        <h3>Rollup</h3>
+        <pre><span class="kw">import</span> { rollupPlugin }
+  <span class="kw">from</span> <span class="str">"rflct/rollup"</span>;
+
+<span class="kw">export default</span> {
+  plugins: [<span class="fn">rollupPlugin</span>()]
+};</pre>
+      </div>
+      <div class="tool-card">
+        <h3>webpack</h3>
+        <pre><span class="kw">const</span> { webpackPlugin }
+  = <span class="fn">require</span>(<span class="str">"rflct/webpack"</span>);
+
+module.exports = {
+  plugins: [<span class="fn">webpackPlugin</span>()]
+};</pre>
+      </div>
+      <div class="tool-card">
+        <h3>esbuild</h3>
+        <pre><span class="kw">import</span> { esbuildPlugin }
+  <span class="kw">from</span> <span class="str">"rflct/esbuild"</span>;
+
+<span class="fn">build</span>({
+  plugins: [<span class="fn">esbuildPlugin</span>()]
+});</pre>
+      </div>
+    </div>
+    <div class="card" style="margin-top:24px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+      <div>
+        <h3>Don't use a bundler?</h3>
+        <p>RFLCT also provides a CLI for standalone TypeScript 7 / <code>tsgo</code> projects.</p>
+      </div>
+      <pre style="flex:1;min-width:280px">npx rflct -p tsconfig.json -o dist</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ── ADVANCED ── -->
+<section>
+  <div class="section-inner">
+    <div class="section-label">Advanced</div>
+    <h2 class="section-title">Advanced concepts</h2>
+    <p class="section-desc">Powerful features for complex dependency injection and reflection scenarios.</p>
+    <div class="cards cards-3">
+      <div class="card">
+        <h3>Multi-injection</h3>
+        <pre style="margin-top:8px"><span class="ty">Reflect</span>&lt;<span class="ty">Service</span>[]&gt;</pre>
+        <p style="margin-top:8px">Inject arrays of services with <code>elementType</code> metadata for collection injection.</p>
+      </div>
+      <div class="card">
+        <h3>Metadata arguments</h3>
+        <pre style="margin-top:8px"><span class="ty">Reflect</span>&lt;<span class="ty">T</span>, { optional: <span class="kw">true</span> }&gt;</pre>
+        <p style="margin-top:8px">Attach arbitrary metadata — optionality, constraints, names — to any annotated parameter or property.</p>
+      </div>
+      <div class="card">
+        <h3>Reflectable&lt;T&gt;</h3>
+        <pre style="margin-top:8px"><span class="kw">class</span> <span class="ty">Svc</span> <span class="kw">implements</span> <span class="ty">Reflectable</span> {}</pre>
+        <p style="margin-top:8px">Auto-reflect all constructor parameters — no individual <code>Reflect&lt;T&gt;</code> annotations needed.</p>
+      </div>
+      <div class="card">
+        <h3>Type-only symbols</h3>
+        <p>Interfaces and type aliases get stable <code>Symbol.for(...)</code> runtime identities.</p>
+      </div>
+      <div class="card">
+        <h3>Symbol qualification</h3>
+        <p>The <code>package@major|path|Name</code> format ensures cross-package interop guarantees.</p>
+      </div>
+      <div class="card">
+        <h3>Cross-package interop</h3>
+        <p>Symbols from different packages resolve to the same identity when types match.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FAQ ── -->
+<section id="faq" style="background:var(--bg-card)">
+  <div class="section-inner">
+    <div class="section-label">FAQ</div>
+    <h2 class="section-title">Frequently asked questions</h2>
+    <p class="section-desc" style="margin-bottom:32px"></p>
+    <div class="faq-list">
+      <div class="faq-item">
+        <button class="faq-q" onclick="this.parentElement.classList.toggle('open')">Does RFLCT require decorators?</button>
+        <div class="faq-a"><p>No. RFLCT uses type annotations (<code>Reflect&lt;T&gt;</code>) instead of decorators. Your code stays standard TypeScript.</p></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="this.parentElement.classList.toggle('open')">Does RFLCT require emitDecoratorMetadata?</button>
+        <div class="faq-a"><p>No. RFLCT generates metadata at build time — no legacy compiler flags needed.</p></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="this.parentElement.classList.toggle('open')">Does RFLCT replace reflect-metadata?</button>
+        <div class="faq-a"><p>No — it generates metadata compatible with the existing <code>Reflect.defineMetadata</code> / <code>Reflect.getMetadata</code> API. You still import <code>reflect-metadata</code> as a polyfill.</p></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="this.parentElement.classList.toggle('open')">Does it work with interfaces?</button>
+        <div class="faq-a"><p>Yes. RFLCT gives type-only entities (interfaces, type aliases) stable <code>Symbol.for(...)</code> runtime identities so they can participate in dependency injection.</p></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="this.parentElement.classList.toggle('open')">What build tools are supported?</button>
+        <div class="faq-a"><p>Vite, Rollup, webpack, and esbuild via unplugin, plus a standalone CLI for TypeScript 7 / <code>tsgo</code> projects.</p></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="this.parentElement.classList.toggle('open')">Does RFLCT work with dependency injection?</button>
+        <div class="faq-a"><p>Yes — DI is one of its primary use cases. RFLCT is designed to work with InversifyJS and other DI containers that consume <code>design:paramtypes</code> metadata.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FOOTER ── -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-brand"><img src="./RFLCT.png" alt="RFLCT" /> RFLCT</div>
+    <div class="footer-links">
+      <a href="https://github.com/inversify/rflct" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://www.npmjs.com/package/rflct" target="_blank" rel="noopener">npm</a>
+      <a href="https://github.com/inversify/rflct/tree/main/docs" target="_blank" rel="noopener">Docs</a>
+      <a href="https://github.com/inversify/rflct/blob/main/docs/philosophy.md" target="_blank" rel="noopener">Philosophy</a>
+      <a href="https://github.com/inversify/rflct/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+      <a href="https://github.com/inversify/rflct/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+    </div>
+    <div class="footer-copy">MIT Licensed · Copyright &copy; Remo H. Jansen</div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,4 +1,4 @@
-<img src="RFLCT.png" alt="RFLCT Logo" width="200" height="auto" />
+<img src="./web/RFLCT.png" alt="RFLCT Logo" width="200" height="auto" />
 
 # RFLCT: Runtime type metadata in TS 7.0+ No `--emitDecoratorMetadata`or decorators required
 
@@ -103,15 +103,15 @@ Reflect.defineMetadata("design:symbols", Object.assign(
 | [Symbol Qualification](docs/symbol-qualification.md) | The `package@major\|path\|Name` format and cross-package interop guarantees |
 | [Internals](docs/internals.md) | Architecture — transform pipeline, CLI vs unplugin, type serialization, module structure |
 
-## Four transformations
+## Transformations
 
 | # | Metadata key | What it does |
 |---|-------------|--------------|
 | 1 | `design:symbols` | Global type registry — every class, interface, and type alias is registered process-wide |
 | 2 | `design:paramtypes` | Parameter type metadata — `{ type, metadata }` entries for constructors and methods |
-| 2b | `design:propertytype` | Property type metadata — `{ type, metadata }` entries for class properties |
-| 3 | `design:properties` | Property name registry — lists which properties on a class carry `Reflect<T>` annotations |
-| 4 | `design:class` | Class-level metadata via `Reflectable<T>` in `implements` clauses |
+| 3 | `design:propertytype` | Property type metadata — `{ type, metadata }` entries for class properties |
+| 4 | `design:properties` | Property name registry — lists which properties on a class carry `Reflect<T>` annotations |
+| 5 | `design:class` | Class-level metadata via `Reflectable<T>` in `implements` clauses |
 
 `resolve<T>()` is a fifth transformation that replaces calls with the runtime
 identity of `T` at compile time.
